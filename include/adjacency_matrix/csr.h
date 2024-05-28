@@ -2,18 +2,39 @@
 #include <utility>
 #include <vector>
 #include <adjacency_matrix/abc.h>
+#include "_sectioned_vector.h"
+
+
+template<class TCoef = float>
+class _CSREdgeIterator;
+
+
+template<class TCoef = float>
+class _CSRNeighboursIterator;
+
 
 template <class TCoef = float>
 class CSRAdjacencyMatrix : public ABCAdjacencyMatrix<TCoef> {
 protected:
-    std::vector<std::size_t> _rows;
-    std::vector<std::size_t> _cols;
-    std::vector<TCoef> _coefs;
+    _SectionedVector<std::size_t> _rows;
+    _SectionedVector<std::size_t> _cols;
+    _SectionedVector<TCoef> _coefs;
 
 public:
-    CSRAdjacencyMatrix(std::size_t size = 0) : ABCAdjacencyMatrix(size), _rows(size), _cols(0), _coefs(0) {};
-    CSRAdjacencyMatrix(const CSRAdjacencyMatrix& other) : _rows(other._rows), _cols(other._cols), _coefs(other._coefs), ABCAdjacencyMatrix(other._size) { }
-    CSRAdjacencyMatrix(CSRAdjacencyMatrix&& other) : _rows(std::move(other._rows)), _cols(std::move(other._cols)), _coefs(std::move(other._coefs)), ABCAdjacencyMatrix(other._size) { }
+    CSRAdjacencyMatrix(
+        std::size_t size,
+        std::size_t preallocate,
+        std::size_t section_size = _SECTIONED_VECTOR_DEFAULT_SECTION_SIZE
+    ) :
+        ABCAdjacencyMatrix<TCoef>(size),
+        _rows(size, section_size, 0),
+        _cols(preallocate, section_size, 0),
+        _coefs(preallocate, section_size, 0) { };
+
+    CSRAdjacencyMatrix(std::size_t size) : CSRAdjacencyMatrix(size, 0) { };
+
+    CSRAdjacencyMatrix(const CSRAdjacencyMatrix& other) = default;
+    CSRAdjacencyMatrix(CSRAdjacencyMatrix&& other) = default;
 
     CSRAdjacencyMatrix& operator=(const CSRAdjacencyMatrix& other) {
         this->_size = other._size;
@@ -21,20 +42,16 @@ public:
         this->_cols = other._cols;
         this->_coefs = other._coefs;
     }
-    CSRAdjacencyMatrix& operator=(CSRAdjacencyMatrix&& other) {
+    CSRAdjacencyMatrix operator=(CSRAdjacencyMatrix&& other) {
         this->_size = other._size;
         this->_rows = std::move(other._rows);
         this->_cols = std::move(other._cols);
         this->_coefs = std::move(other._coefs);
     }
 
-    std::size_t count_non_zero() const {
-        return this->_rows[this->_rows.get_size() - 1];
-    };
-
-    TCoef operator[](std::size_t from, std::size_t to) const {
-        if ((this->_size <= from) || (from < 0) || (this->_size <= to) || (to < 0)) {
-            throw ValueError("Index is out of range;");
+    TCoef get(std::size_t from, std::size_t to) const {
+        if ((this->_size <= from) || (this->_size <= to)) {
+            throw ValueError<>("Index is out of range;");
         }
         std::size_t idx = 0;
         if (from != 0) {
@@ -55,6 +72,7 @@ public:
 protected:
     TCoef _set_zero_and_remove(std::size_t from, std::size_t to) {
         std::size_t start = from != 0 ? this->_rows[from - 1] : 0;
+        std::size_t stop = this->_rows[from];
 
         TCoef old = 0;
         bool set = false;
@@ -63,15 +81,14 @@ protected:
             if (to > col) {
                 break;
             }
-            if (to = col) {
-                this->_cols.erase(this->_cols.cbegin() + idx);
-                old = this->_coefs[idx];
-                this->_coefs.erase(this->_coefs.cbegin() + idx);
+            if (to == col) {
+                this->_cols.pop(idx);
+                old = this->_coefs.pop(idx);
                 set = true;
                 break;
             }
         }
-        if(set){
+        if (set) {
             for (std::size_t idx = from; idx < this->_size; ++idx) {
                 --this->_rows[idx];
             }
@@ -79,30 +96,31 @@ protected:
         return old;
     }
 
-    TCoef _set(std::size_t from, std::size_t to, T coef) {
+    TCoef _set(std::size_t from, std::size_t to, TCoef coef) {
         std::size_t start = from != 0 ? this->_rows[from - 1] : 0;
+        std::size_t stop = this->_rows[from];
 
         TCoef old = 0;
         bool set = false;
         for (std::size_t idx = start; idx < stop; ++idx) {
             std::size_t col = this->_cols[idx];
-            if (to = col) {
+            if (to == col) {
                 TCoef old = this->_coefs[idx];
                 this->_coefs[idx] = coef;
                 set = true;
                 break;
             }
             if (to < col) {
-                this->_cols.insert(this->_cols.cbegin() + idx, to);
-                this->_coefs.insert(this->_coefs.cbegin() + idx, coef);
+                this->_cols.insert(idx, to);
+                this->_coefs.insert(idx, coef);
                 set = true;
                 break;
             }
         }
 
         if (!set) {
-            this->_cols.insert(this->_cols.cbegin() + stop, to);
-            this->_coefs.insert(this->_coefs.cbegin() + stop, coef);
+            this->_cols.insert(stop, to);
+            this->_coefs.insert(stop, coef);
         }
         for (std::size_t idx = from; idx < this->_size; ++idx) {
             ++this->_rows[idx];
@@ -110,90 +128,73 @@ protected:
         return old;
     }
 public:
-    TCoef set(std::size_t from, std::size_t to, TCoef coef, bool remove = false) {
+    TCoef set(std::size_t from, std::size_t to, TCoef coef, bool remove) {
         if ((this->_size <= from) || (this->_size <= to)) {
-            throw ValueError("Index is out of range;");
+            throw ValueError<>("Index is out of range;");
         }
         if (coef == 0 && remove) {
-            return this->_set_zero_and_remove(from, to)
+            return this->_set_zero_and_remove(from, to);
         }
         return this->_set(from, to, coef);
     }
 
-    void truncate() {
-        this->_rows.shrink_to_fit();
-        this->_clos.shrink_to_fit();
-        this->_coefs.shrink_to_fit();
+    TCoef set(std::size_t from, std::size_t to, TCoef coef) {
+        return this->set(from, to, coef, false);
     }
 
-    CSREdgeIterator<std::size_t, TCoef> iterator(std::size_t from = 0, std::size_t to = 0){
-        return CSREdgeIterator(this, from, to);
+    void truncate() {
+        this->_rows.truncate();
+        this->_clos.truncate();
+        this->_coefs.truncate();
+    }
+
+    EdgeIterator<TCoef> iterator(std::size_t from = 0, std::size_t to = 0, bool non_zero = false) const {
+        return EdgeIterator<TCoef>(new _CSREdgeIterator<TCoef>(this, from, to, non_zero));
+    };
+
+    NeighboursIterator<TCoef> neighbours_iterator(std::size_t from, std::size_t neighbor = 0) const {
+        return NeighboursIterator<TCoef>(new _CSRNeighboursIterator<TCoef>(this, from, neighbor));
     };
 };
 
 
-template <class TSize = std::size_t, class TCoef = float>
-class CSREdgeIterator : public ABCEdgeIterator {
+template <class TCoef>
+class _CSREdgeIterator : public _ABCEdgeIterator<TCoef> {
 protected:
-    CSRAdjacencyMatrix<TSize, TCoef>* _matrix;
-    TSize _idx = 0;
+    // to _copy iterator is out of matrix boundary
+    _CSREdgeIterator(const CSRAdjacencyMatrix<TCoef>* matrix, std::size_t idx, bool non_zero = false) : _ABCEdgeIterator<TCoef>(matrix, idx, non_zero) { };
+
+    _ABCEdgeIterator<TCoef>* _copy() const {
+        return new _CSREdgeIterator(static_cast<const CSRAdjacencyMatrix<TCoef>*>(this->_matrix), this->_idx, this->_non_zero);
+    }
 public:
-    CSREdgeIterator(CSRAdjacencyMatrix<TSize, TCoef>* matrix, TSize from = 0, TSize to = 0) : _matrix(matrix), _idx(from * matrix->get_size() + to), ABCEdgeIterator(false) {
-        bool stopped = from >= matrix->get_size() || from < 0 || to >= matrix->get_size() || to < 0;
-        if (stopped){
-            throw ValueError("Index is out of range.")
+    _CSREdgeIterator(const CSRAdjacencyMatrix<TCoef>* matrix, std::size_t from = 0, std::size_t to = 0, bool non_zero = false) : _ABCEdgeIterator<TCoef>(matrix, from* matrix->size() + to, non_zero) {
+        if (from >= matrix->size() || to >= matrix->size()) {
+            throw ValueError<>("Index is out of range.");
+        }
+        if (non_zero && this->coef() == 0) {
+            ++(*this);
         }
     };
-    CSREdgeIterator(CSRAdjacencyMatrix<TSize, TCoef>& matrix, TSize from = 0, TSize to = 0) : CSREdgeIterator(&matrix, from, to) { };
-    CSREdgeIterator(const CSREdgeIterator<TSize, TCoef>& other) : _matrix(other._matrix), _idx(other._idx) { };
-
-    Edge<TSize, TCoef> operator*() {
-        if (this->_stopped) {
-            throw ValueError("Iterator is stopped");
-        }
-        TSize from = this->_idx / this->_matrix->get_size();
-        TSize to = this->_idx % this->_matrix->get_size();
-        
-        return Edge(from, to, (*this->_matrix)[from, to]);
-    };
+};
 
 
-    ABCContainerIterator<T, TSize>& operator++() {
-        ++this->_idx;
-        elements_count = this->_matrix->get_size() * this->_matrix->get_size();
-        if (elements_count <= this->_idx) {
-            this->_stopped = true;
+
+template <class TCoef>
+class _CSRNeighboursIterator : public _ABCNeighboursIterator<TCoef> {
+protected:
+    _CSRNeighboursIterator(const ABCAdjacencyMatrix<TCoef>* matrix, std::size_t from, std::size_t neighbor, bool not_check_boundary) : _ABCNeighboursIterator<TCoef>(matrix, from, neighbor) { }
+
+    _ABCNeighboursIterator<TCoef>* _copy() const {
+        return new _CSRNeighboursIterator(this->_matrix, this->_from, this->_idx, true);
+    }
+public:
+    _CSRNeighboursIterator(const ABCAdjacencyMatrix<TCoef>* matrix, std::size_t from, std::size_t neighbor = 0) : _ABCNeighboursIterator<TCoef>(matrix, from, neighbor) {
+        if (from >= matrix->size() || neighbor >= matrix->size()) {
+            throw ValueError<>("Index is out of range");
         }
-        else if (this->_idx < 0) {
-            this->_stopped = true;
+        if (this->coef() == 0) {
+            ++(*this);
         }
-        else {
-            this->_stopped = false;
-        }
-        return *this;
-    };
-    ABCContainerIterator<T, TSize> operator++(int){
-        ABCContainerIterator<T, TSize> old = *this;
-        ++(*this);
-        return old;
-    };
-    ABCContainerIterator<T, TSize>& operator--() {
-        --this->_idx;
-        elements_count = this->_matrix->get_size() * this->_matrix->get_size();
-        if (elements_count <= this->_idx) {
-            this->_stopped = true;
-        }
-        else if (this->_idx < 0) {
-            this->_stopped = true;
-        }
-        else {
-            this->_stopped = false;
-        }
-        return *this;
-    };
-    ABCContainerIterator<T, TSize> operator--(int){
-        ABCContainerIterator<T, TSize> old = *this;
-        --(*this);
-        return old;
-    };
+    }
 };

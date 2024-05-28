@@ -34,3 +34,9 @@
 /test*
 /.vscode/tasks.json
 /.vscode/launch.json
+
+__pycache__
+.venv
+
+/main*
+/example*
