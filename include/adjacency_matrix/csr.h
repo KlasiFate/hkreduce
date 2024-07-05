@@ -49,7 +49,7 @@ public:
         this->_coefs = std::move(other._coefs);
     }
 
-    TCoef get(std::size_t from, std::size_t to) const {
+    TCoef get(std::size_t from, std::size_t to) const override {
         if ((this->_size <= from) || (this->_size <= to)) {
             throw ValueError<>("Index is out of range;");
         }
@@ -138,7 +138,7 @@ public:
         return this->_set(from, to, coef);
     }
 
-    TCoef set(std::size_t from, std::size_t to, TCoef coef) {
+    TCoef set(std::size_t from, std::size_t to, TCoef coef) override {
         return this->set(from, to, coef, false);
     }
 
@@ -164,7 +164,7 @@ protected:
     // to _copy iterator is out of matrix boundary
     _CSREdgeIterator(const CSRAdjacencyMatrix<TCoef>* matrix, std::size_t idx, bool non_zero = false) : _ABCEdgeIterator<TCoef>(matrix, idx, non_zero) { };
 
-    _ABCEdgeIterator<TCoef>* _copy() const {
+    _ABCEdgeIterator<TCoef>* _copy() const override {
         return new _CSREdgeIterator(static_cast<const CSRAdjacencyMatrix<TCoef>*>(this->_matrix), this->_idx, this->_non_zero);
     }
 public:
@@ -185,7 +185,7 @@ class _CSRNeighboursIterator : public _ABCNeighboursIterator<TCoef> {
 protected:
     _CSRNeighboursIterator(const ABCAdjacencyMatrix<TCoef>* matrix, std::size_t from, std::size_t neighbor, bool not_check_boundary) : _ABCNeighboursIterator<TCoef>(matrix, from, neighbor) { }
 
-    _ABCNeighboursIterator<TCoef>* _copy() const {
+    _ABCNeighboursIterator<TCoef>* _copy() const override {
         return new _CSRNeighboursIterator(this->_matrix, this->_from, this->_idx, true);
     }
 public:
