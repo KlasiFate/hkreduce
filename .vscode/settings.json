@@ -47,6 +47,9 @@
         "set": "cpp",
         "chrono": "cpp",
         "ctime": "cpp",
-        "ratio": "cpp"
-    }
+        "ratio": "cpp",
+        "cerrno": "cpp",
+        "queue": "cpp"
+    },
+    "C_Cpp.errorSquiggles": "enabled"
 }
