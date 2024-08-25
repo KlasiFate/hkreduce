@@ -1,17 +1,15 @@
 {
     "configurations": [
+        // TODO: add support for Windows
         {
             "name": "linux",
             "includePath": [
                 "${workspaceFolder}/include",
-                "${default}"
+                "/usr/local/include/python3.10",
+                "${workspaceFolder}/.venv/lib/python3.10/site-packages/numpy/_core/include"
             ],
             "defines": [
                 "${default}"
-            ],
-            "macFrameworkPath": [
-                "${default}",
-                "${workspaceFolder}/include"
             ],
             "compileCommands": "${default}",
             "browse": {

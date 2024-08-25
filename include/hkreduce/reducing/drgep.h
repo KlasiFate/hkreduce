@@ -9,7 +9,7 @@
 template<class TCoef>
 class DRGEP {
 private:
-    void _insert(BasedOnFixedArrayCollection<TCoef>& paths_lengths, std::size node) {
+    void _insert(ArrayCollection<TCoef>& paths_lengths, std::size node) {
         TCoef path_length = paths_lengths[node];
         std::size_t idx = queue->size();
         // allocate space
@@ -28,11 +28,11 @@ private:
     void _update(){}
 
     std::vector<TCoef> _run_and_return_paths(ABCAdjacencyMatrix<TCoef>& matrix, std::size_t from, TCoef threshold) const {
-        std::size_t* queue_array = new std::size_t[matrix.size()];
-        BasedOnFixedArrayCollection<std::size_t> ordered_queue(queue_array, matrix.size(), 0, true);
+        std::size_t* queue_array = new std::size_t[matrix.getSize()];
+        ArrayCollection<std::size_t> ordered_queue(queue_array, matrix.getSize(), 0, true);
 
-        TCoef* paths_lengths_array = new TCoef[matrix.size()];
-        BasedOnFixedArrayCollection<TCoef> paths_lengths(paths_lengths_array, matrix.size(), matrix.size(), true);
+        TCoef* paths_lengths_array = new TCoef[matrix.getSize()];
+        ArrayCollection<TCoef> paths_lengths(paths_lengths_array, matrix.getSize(), matrix.getSize(), true);
 
         ordered_queue.append(from);
         paths_lengths[from] = 1;
@@ -42,9 +42,9 @@ private:
             std::size_t current_node = ordered_queue.remove(ordered_queue.size() - 1);
             TCoef current_path_length = paths_lengths[current_node];
 
-            matrix.neighbours_iterator(current_node, 0, iterator);
+            matrix.getNeighboursIterator(current_node, 0, iterator);
             // queue_changed = false;
-            for(; !iterator.stopped(); ++iterator){
+            for(; !iterator.getStopped(); ++iterator){
                 std::size_t neighbour = iterator.to();
                 TCoef neighbour_path_length = iterator.coef() * current_path_length;
                 if(neighbour_path_length <= paths_lengths[neighbour]){

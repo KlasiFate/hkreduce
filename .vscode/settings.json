@@ -49,7 +49,19 @@
         "ctime": "cpp",
         "ratio": "cpp",
         "cerrno": "cpp",
-        "queue": "cpp"
+        "queue": "cpp",
+        "cinttypes": "cpp",
+        "cstring": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "numbers": "cpp"
     },
-    "C_Cpp.errorSquiggles": "enabled"
+    "C_Cpp.errorSquiggles": "enabled",
+    "cSpell.language": "en,ru",
+    "cSpell.words": [],
+    "files.exclude": {
+        "**/.git": true,
+        "**/.mypy_cache": true,
+        "**/.venv":true
+    }
 }
