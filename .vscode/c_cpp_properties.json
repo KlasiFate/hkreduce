@@ -17,13 +17,15 @@
                 "databaseFilename": "${default}",
                 "path": [
                     "${default}",
-                    "${workspaceFolder}/include"
+                    "${workspaceFolder}/include",
+                    "/usr/local/include/python3.10",
+                    "${workspaceFolder}/.venv/lib/python3.10/site-packages/numpy/_core/include"
                 ]
             },
-            "intelliSenseMode": "clang-x64",
+            "intelliSenseMode": "gcc-x64",
             "cStandard": "c11",
             "cppStandard": "c++11",
-            "compilerPath": "/usr/bin/clang"
+            "compilerPath": "/usr/bin/gcc"
         }
     ],
     "version": 4

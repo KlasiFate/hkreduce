@@ -2,7 +2,7 @@
 
 #define PY_SSIZE_T_CLEAN
 
-#include <stddef.h>
+#include <cstddef>
 #include <cstring>
 
 #include "Python.h"
@@ -13,8 +13,6 @@
 #include "hkreduce/collections/array_based.h"
 #include "hkreduce/collections/sectioned.h"
 
-#include "./allocator.h"
-
 
 typedef struct {
     PyObject_HEAD
@@ -24,7 +22,7 @@ typedef struct {
 
 static void CSRAdjacencyMatrixObject_dealloc(CSRAdjacencyMatrixObject* self) {
     if(self->matrix != nullptr && self->matrix != NULL){
-        WrapperOfPyAllocator* allocator = getWrapperOfPyAllocator();
+        Allocator* allocator = getDefaultAllocator();
         allocator->deallocate((void*) self->matrix);
     }
 }
@@ -50,8 +48,7 @@ static int CSRAdjacencyMatrixObject_init(CSRAdjacencyMatrixObject* self, PyObjec
     }
     size_t size = (size_t) sizeNotRebound;
 
-    // TODO: replace to default getDefaultAllocator
-    WrapperOfPyAllocator* allocator = getWrapperOfPyAllocator();
+    Allocator* allocator = getDefaultAllocator();
 
     IndexableCollection<size_t>* rows = nullptr;
     IndexableCollection<size_t>* cols = nullptr;
@@ -184,15 +181,15 @@ static PyMethodDef CSRAdjacencyMatrixObject_methods[] = {
 static PyTypeObject CSRAdjacencyMatrixType = {
     .ob_base = PyVarObject_HEAD_INIT(NULL, 0)
     .tp_name = "hkreduce.c_interface.CSRAdjacencyMatrix",
-    .tp_doc = PyDoc_STR("CSR adjacency matrix, that store data"),
     .tp_basicsize = sizeof(CSRAdjacencyMatrixObject),
     .tp_itemsize = 0,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_new = CSRAdjacencyMatrixObject_new,
-    .tp_init = (initproc) CSRAdjacencyMatrixObject_init,
     .tp_dealloc = (destructor) CSRAdjacencyMatrixObject_dealloc,
-    .tp_members = CSRAdjacencyMatrixObject_members,
+    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    .tp_doc = PyDoc_STR("CSR adjacency matrix, that store data"),
     .tp_methods = CSRAdjacencyMatrixObject_methods,
+    .tp_members = CSRAdjacencyMatrixObject_members,
+    .tp_init = (initproc) CSRAdjacencyMatrixObject_init,
+    .tp_new = CSRAdjacencyMatrixObject_new,
 };
 
 static PyModuleDef c_interface_module = {
@@ -203,15 +200,17 @@ static PyModuleDef c_interface_module = {
 };
 
 PyMODINIT_FUNC
-PyInit_custom2(void)
+PyInit_hkreduce_c_interface(void)
 {
     PyObject *m;
-    if (PyType_Ready(&CSRAdjacencyMatrixType) < 0)
+    if (PyType_Ready(&CSRAdjacencyMatrixType) < 0){
         return NULL;
+    }
 
     m = PyModule_Create(&c_interface_module);
-    if (m == NULL)
+    if (m == NULL){
         return NULL;
+    }
 
     if (PyModule_AddObjectRef(m, "CSRAdjacencyMatrix", (PyObject *) &CSRAdjacencyMatrixType) < 0) {
         Py_DECREF(m);

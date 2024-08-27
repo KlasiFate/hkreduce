@@ -1,10 +1,10 @@
-#pragma once
-
+#include <cstddef>
 #include <stdexcept>
 
 #include "Python.h"
 
-#include "graph_reducing/allocators/abc.h"
+#include "hkreduce/allocators/abc.h"
+#include "hkreduce/allocators/default.h"
 
 using namespace std;
 
@@ -21,11 +21,14 @@ public:
 
 class WrapperOfPyAllocator : public Allocator {
 public:
+    WrapperOfPyAllocator(){}
+
     void* allocate(size_t size) override {
         void* ptr = PyMem_RawMalloc(size);
         if (ptr == NULL) {
-            throw PyBadAlloc("PyMem_RawMalloc returns NULL");
+            throw PyBadAlloc("PyMem_RawMalloc returned NULL");
         }
+        return ptr;
     }
 
     void deallocate(void* ptr) noexcept override {
@@ -33,4 +36,7 @@ public:
     }
 };
 
-WrapperOfPyAllocator* getWrapperOfPyAllocator();
+Allocator* getDefaultAllocator(){
+    static WrapperOfPyAllocator allocator;
+    return &allocator;
+}

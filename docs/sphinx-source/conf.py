@@ -13,7 +13,7 @@ author = 'klasifate'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = []
+extensions = ["breathe"]
 
 templates_path = ['_templates']
 exclude_patterns = []
@@ -25,3 +25,6 @@ language = 'ru'
 
 html_theme = 'alabaster'
 html_static_path = ['_static']
+
+
+breathe_default_project = "hkreduce"

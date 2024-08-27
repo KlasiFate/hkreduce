@@ -17,6 +17,7 @@ cantera = "^3.0.1"
 ipython = "^8.26.0"
 sphinx = "<8"
 sphinx-rtd-theme = "^2.0.0"
+breathe = "^4.35.0"
 
 [build-system]
 requires = ["poetry-core"]

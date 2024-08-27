@@ -8,59 +8,61 @@
 
 template<class T>
 class SectionedCollection : public IndexableCollection<T> {
-public:
-    typedef DArrayCollection<T*> Sections;
+private:
+    class Section: public ArrayCollection<T> {
+    public:
+        T* getPtr(size_t idx){
+            return this->array + idx;
+        }
 
-protected:
+        void constructAt(size_t idx, const T& value){
+            new (this->array + idx) T(value);
+            this->setSize(++this->getSize());
+            ++this->initalizedElements;
+        }
+
+        Section(size_t sectionSize, Allocator* allocator): ArrayCollection((T*) allocator->allocate(sizeof(T) * sectionSize), sectionSize, 0, true, allocator) {}
+    };
+
+    typedef DArrayCollection<Section> Sections;
+
     Sections sections;
     size_t sectionSize;
-    size_t initializedElements;
     bool collectionInitialized;
+
+    void allocateSections(size_t allocated, Allocator* allocator, size_t sectionSize){
+        size_t sectionsCount = allocated / sectionSize + (allocated % sectionSize == 0 ? 0 : 1);
+        size_t allocatedSizeOfArray = (sectionsCount / 1024 + (sectionsCount % 1024 == 0 ? 0 : 1)) * 1024;
+        
+        this->sections = Sections(
+            (Section*) allocator->allocate(sizeof(Section) * allocatedSizeOfArray),
+            allocatedSizeOfArray,
+            0,
+            true,
+            allocator,
+            1024
+        );
+        size_t wasAllocated = 0;
+        for (; wasAllocated < sectionsCount; ++wasAllocated) {
+            this->sections.append(Section(sectionSize, allocator));
+        }
+    }
 
 public:
     SectionedCollection() :
         IndexableCollection(0),
         sections(),
         sectionSize(0),
-        initializedElements(0),
         collectionInitialized(false) { }
 
-private:
-    void allocateSections(size_t allocated, Allocator* allocator){
-        size_t sectionsCount = allocated / this->sectionSize + (allocated % this->sectionSize == 0 ? 0 : 1);
-        size_t allocatedSizeOfArray = (sectionsCount / 1024 + (sectionsCount % 1024 == 0 ? 0 : 1)) * 1024;
-        this->sections = Sections(
-            allocator->allocate(sizeof(T*) * allocatedSizeOfArray),
-            allocatedSizeOfArray,
-            sectionsCount,
-            true,
-            1024,
-            allocator
-        );
-        size_t wasAllocated = 0;
-        try {
-            for (; wasAllocated < sectionsCount; ++wasAllocated) {
-                this->sections[wasAllocated] = allocator->allocate(sizeof(T) * sectionSize);
-            }
-        }
-        catch (const bad_alloc& error) {
-            for (size_t i = 0; i < wasAllocated; ++i) {
-                allocator->deallocate(this->sections[i]);
-            }
-            throw;
-        }
-    }
-
-public:
     SectionedCollection(
         size_t allocated,
         Allocator* allocator = getDefaultAllocator(),
         size_t sectionSize = DEFAULT_BLOCK_SIZE
     ) :
-        IndexableCollection(0),
+        IndexableCollection(0, allocator),
         sections(),
         sectionSize(sectionSize),
-        initializedElements(0),
         collectionInitialized(true) {
         if (sectionSize == 0) {
             throw new invalid_argument("Section size equals zero");
@@ -68,7 +70,7 @@ public:
         if (allocator == nullptr) {
             throw new invalid_argument("Allocator can't equal nullptr")
         }
-        this->allocateSections(allocated, allocator);
+        this->allocateSections(allocated, allocator, sectionSize);
     }
 
     template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
@@ -78,14 +80,12 @@ public:
         Allocator* allocator = getDefaultAllocator(),
         size_t sectionSize = DEFAULT_BLOCK_SIZE
     ) : SectionedCollection(size, allocator, sectionSize) {
-        // "this->initializedElements" в цикле используется для поддержания в актуальном состоянии данного показателя
-        // на случай, если в одном из конструкторов T произойдет ошибка и раскрутка стека удалит коллекцию
-        for (; this->initializedElements < size; ;) {
-            size_t sectionIdx = this->initializedElements / this->sectionSize;
-            size_t idxInSection = this->initializedElements % this->sectionSize;
-            new (this->sections[sectionIdx] + idxInSection) T(value);
-            this->setSize(++this->initializedElements);
+        for (size_t i = 0; i < size; ++i) {
+            size_t sectionIdx = i / sectionSize;
+            size_t idxInSection = i % sectionSize;
+            this->sections[sectionIdx].constructAt(idxInSection, value);
         }
+        this->setSize(size);
     };
 
     template<enable_if_t<!is_copy_constructible<T>::value, bool> = true>
@@ -93,28 +93,26 @@ public:
 
     template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
     SectionedCollection(const SectionedCollection<T>& other) :
-        IndexableCollection(0),
+        IndexableCollection(other.getSize(), other.getAllocator()),
         sections(),
         sectionSize(other.sectionSize),
-        initializedElements(other.initializedElements),
         collectionInitialized(other.collectionInitialized) {
         if (!other.collectionInitialized) {
             return;
         }
-        this->allocateSections(other.getSize(), other.getAllocator());
 
-        for (; this->initializedElements < size; ;) {
-            size_t sectionIdx = this->initializedElements / this->sectionSize;
-            size_t idxInSection = this->initializedElements % this->sectionSize;
-            new (this->sections[sectionIdx] + idxInSection) T(other->sections[sectionIdx] + idxInSection);
-            this->setSize(++this->initializedElements);
+        this->allocateSections(other.getSize(), other.getAllocator(), other.sectionSize);
+
+        for (size_t i = 0; i < size; ++i) {
+            size_t sectionIdx = i / other.sectionSize;
+            size_t idxInSection = i % other.sectionSize;
+            this->sections[sectionIdx].constructAt(idxInSection, other.sections[sectionIdx][idxInSection]);
         }
     }
 
-    SectionedCollection(SectionedCollection<T>&& other) :
-        IndexableCollection(other.getSize()),
+    SectionedCollection(SectionedCollection<T>&& other) noexcept:
+        IndexableCollection(other.getSize(), other.getAllocator()),
         sections(move(other.sections)),
-        initializedElements(other.initializedElements),
         sectionSize(other.sectionSize),
         collectionInitialized(other.collectionInitialized) { };
 
@@ -127,90 +125,63 @@ public:
             return;
         }
 
-        if (this->collectionInitialized) {
-            if (!is_trivial<T>::value) {
-                for (size_t i = 0; i < this->initializedElements; ++i) {
-                    (*this)[i].~T();
-                }
+        if(other.collectionInitialized){
+            this->allocateSections(other.getSize(), other.getAllocator(), other.sectionSize);
+            
+            for (size_t i = 0; i < size; ++i) {
+                size_t sectionIdx = i / other.sectionSize;
+                size_t idxInSection = i % other.sectionSize;
+                this->sections[sectionIdx].constructAt(idxInSection, other.sections[sectionIdx][idxInSection]);
             }
-            this->initializedElements = 0;
-            this->setSize(0);
-        }
 
-        if(!other.collectionInitialized && this->collectionInitialized){
-            for (size_t i = 0; i < this->sections.getSize(); ++i) {
-                this->sections->getAllocator()->deallocate(this->sections[i]);
-            }
-            this->sections = other.sections();
-            this->collectionInitialized = false;
+            this->setSize(other.getSize());
+            this->setAllocator(other.getAllocator());
+            this->sectionSize = other.sectionSize;
+            this->collectionInitialized = true;
             return;
         }
 
-        if(!this->collectionInitialized){
-            this->sectionSize = other.sectionSize;
-            this->allocateSections(other.getSize(), other.getAllocator());
-            this->collectionInitialized = true;
-        }else{
-            size_t newSectionsCount = other.getSize() / this->sectionSize + (other.getSize() % this->sectionSize == 0 ? 0 : 1);
-            this->resize(newSectionsCount * this->sectionSize);
-        }
-
-        for(size_t i = 0; i < other.getSize(); ++i){
-            size_t sectionIdx = idx / this->getSectionSize();
-            size_t idxInSection = idx % this->getSectionSize();
-            new (this->sections[sectionIdx] + idxInSection) T(other->sections[sectionIdx] + idxInSection);
-        }
+        this->setSize(other.getSize());
+        this->setAllocator(other.getAllocator());
+        this->sections = other.sections;
+        this->sectionSize = other.sectionSize;
+        this->collectionInitialized = other.collectionInitialized;
     }
 
-    SectionedCollection& operator=(SectionedCollection<T>&& other) {
+    SectionedCollection& operator=(SectionedCollection<T>&& other) noexcept {
         if (this == &other) {
             return;
         }
 
-        if (!is_trivial<T>::value) {
-            for (size_t i = 0; i < this->initializedElements; ++i) {
-                (*this)[i].~T();
-            }
-        }
-        for (size_t i = 0; i < this->sections.getSize(); ++i) {
-            this->sections->getAllocator()->deallocate(this->sections[i]);
-        }
-
         this->sections = move(other.sections);
-        this->initializedElements = other.initializedElements;
-        this->setSize(other.getSize());
         this->sectionSize = other.sectionSize;
+        this->collectionInitialized = other.collectionInitialized;
+        this->setSize(other.getSize());
+        this->setAllocator(other.getAllocator());
     }
 
-    ~SectionedCollection() {
-        if (!is_trivial<T>::value) {
-            for (size_t i = 0; i < this->initializedElements; ++i) {
-                (*this)[i].~T();
-            }
-        }
-        for (size_t i = 0; i < this->sections.getSize(); ++i) {
-            this->sections->getAllocator()->deallocate(this->sections[i]);
-        }
-    }
+    size_t getAllocatedSize() const {
+        return this->sectionSize * this->sections->getSize();
+    };
 
-    Allocator* getAllocator() const {
-        return sections->getAllocator();
+    size_t getSectionSize() const {
+        return this->sectionSize;
     }
 
     T& operator[](size_t idx) override {
         if(idx >= this->getSize()){
             throw out_of_range("Idx is out of range");
         }
-        size_t sectionIdx = idx / this->getSectionSize();
-        size_t idxInSection = idx % this->getSectionSize();
+        size_t sectionIdx = idx / sectionSize;
+        size_t idxInSection = idx % sectionSize;
         return this->sections[sectionIdx][idxInSection];
     };
     const T& operator[](size_t idx) const override {
         if(idx >= this->getSize()){
             throw out_of_range("Idx is out of range");
         }
-        size_t sectionIdx = idx / this->getSectionSize();
-        size_t idxInSection = idx % this->getSectionSize();
+        size_t sectionIdx = idx / this->sectionSize;
+        size_t idxInSection = idx % this->sectionSize;
         return this->sections[sectionIdx][idxInSection];
     };
 
@@ -222,7 +193,12 @@ public:
         size_t sectionIdx = idx / this->getSectionSize();
         size_t idxInSection = idx % this->getSectionSize();
         T old(move(this->sections[sectionIdx][idxInSection]));
-        this->sections[sectionIdx][idxInSection] = element;
+        try{
+            this->sections[sectionIdx][idxInSection] = element;
+        }catch(...){
+            this->sections[sectionIdx][idxInSection] = move(old);
+            throw;
+        }
         return old;
     };
 
@@ -237,52 +213,29 @@ public:
         return old;
     };
 
-    void resize(size_t newSpaceSize) {
-        if (newSpaceSize < this->getSize()) {
-            throw out_of_range("newSpaceSize argument is less than current size");
+    void resize(size_t newSpaceSize) override {
+        if(newSpaceSize < this->getSize()){
+            throw invalid_argument("New space size is less than current size");
         }
 
-        size_t newSectionsCount = newSpaceSize / this->sectionSize + (newSpaceSize % this->sectionSize == 0 ? 0 : 1);
-
-        if (newSectionsCount == this->sections.getSize()) {
-            return;
-        }
-        if (newSectionsCount > this->sections.getSize()) {
-            for (size_t i = 0; i < newSectionsCount - this->sections.getSize(); ++i) {
-                this->sections.append(this->sections.getAllocator()->allocate(sizeof(T) * this->sectionSize));
-            }
-            return;
+        size_t newSectionCount = newSpaceSize / this->sectionSize;
+        if(newSpaceSize % this->sectionSize != 0){
+            ++newSectionCount;
         }
 
-        size_t fullInitializedSectionsCount = this->initializedElements / this->sectionSize;
-        size_t remainingInitializedElementsCount = this->initializedElements % this->sectionSize;
-
-        size_t sectionsCountToRemove = this->sections.getSize() - newSectionsCount;
-        for (size_t i = 0; i < sectionsCountToRemove; ++i) {
-            size_t sectionIdx = this->sections.getSize() - 1;
-            T* section = this->sections.remove(sectionIdx);
-            if (sectionIdx < fullInitializedSectionsCount) {
-                if (!is_trivial<T>::value) {
-                    for (size_t i = 0; i < this->sectionSize; ++i) {
-                        section[i].~T();
-                    }
-                }
-                this->initializedElements -= this->sectionSize;
+        if(newSectionCount > this->sections.getSize()){
+            for(size_t i = 0; i < newSectionCount - this->sections.getSize(); ++i){
+                this->sections.append(Section(this->sectionSize, this->getAllocator()));
             }
-            else if (sectionIdx == fullInitializedSectionsCount) {
-                if (!is_trivial<T>::value) {
-                    for (size_t i = 0; i < remainingInitializedElementsCount; ++i) {
-                        section[i].~T();
-                    }
-                }
-                this->initializedElements -= remainingInitializedElementsCount;
+        }else{
+            for(size_t i = 0; i < this->sections.getSize() - newSectionCount; ++i){
+                this->sections.remove(this->sections.getSize() - 1);
             }
-            this->sections.getAllocator()->deallocate((void*) section);
         }
     }
 
-private:
-    void insert(size_t idx, function<void(T*)> assignOrConstruct) {
+    template<enable_if_t<is_copy_assignable<T>::value&& is_copy_constructible<T>::value, bool> = true>
+    void insert(size_t idx, const T& element) {
         if (idx > this->getSize()) {
             throw out_of_range("idx argument is out of range");
         }
@@ -290,92 +243,90 @@ private:
             this->resize(this->getSize() + this->sectionSize);
         }
 
-        // TODO: optimize for trivial types
+        size_t sectionIdx = idx / this->sectionSize;
+        size_t idxInSection = idx % this->sectionSize;
 
-        if (this->getSize() == this->wasInitalized) {
-            size_t sectionIdx = this->getSize() / this->sectionSize;
-            size_t idxInSection = this->getSize() % this->sectionSize;
-            if (this->getSize() == idx) {
-                assignOrConstruct(this->sections[sectionIdx] + idxInSection, false);
-            }
-            else {
-                size_t sectionIdx2 = (this->getSize() - 1) / this->sectionSize;
-                size_t idxInSection2 = (this->getSize() - 1) % this->sectionSize;
-                new (this->sections[sectionIdx] + idxInSection) T(move(*(this->sections[sectionIdx2] + idxInSection2)));
-                for (size_t i = this->getSize() - 1; i > idx; --i) {
-                    sectionIdx = i / this->sectionSize;
-                    sectionIdx2 = (i - 1) / this->sectionSize;
-                    idxInSection = i % this->sectionSize;
-                    idxInSection2 = (i - 1) % this->sectionSize;
-
-                    *(this->sections[sectionIdx] + idxInSection) = move(*(this->sections[sectionIdx2] + idxInSection2));
-                }
-                sectionIdx = idx / this->sectionSize;
-                idxInSection = idx % this->sectionSize;
-                assignOrConstruct(this->sections[sectionIdx] + idxInSection, true);
-            }
-
-            this->setSize(this->getSize() + 1);
-            ++this->wasInitalized;
+        Section& section = this->sections[sectionIdx];
+        if(section.getSize() < this->sectionSize){
+            section.insert(idxInSection, element);
+            this->setSize(++this->getSize());
             return;
         }
 
-        for (size_t i = this->getSize(); i > idx; --i) {
-            size_t sectionIdx = i / this->sectionSize;
-            size_t sectionIdx2 = (i - 1) / this->sectionSize;
-            size_t idxInSection = i % this->sectionSize;
-            size_t idxInSection2 = (i - 1) % this->sectionSize;
-            *(this->sections[sectionIdx] + idxInSection) = move(*(this->sections[sectionIdx2] + idxInSection2));
+        size_t lastUsedSectionIdx = this->getSize() / this->sectionSize;
+        for(size_t i = lastUsedSectionIdx; i > sectionIdx; --i){
+            Section& prevSection = this->sections[i - 1];
+            this->sections[i].insert(0, this->sections[i - 1].remove(this->sectionSize - 1))
         }
-        size_t sectionIdx = idx / this->sectionSize;
-        size_t idxInSection = idx % this->sectionSize;
-        assignOrConstruct(this->sections[sectionIdx] + idxInSection, true);
 
-        this->setSize(this->getSize() + 1);
+        try{
+            section.insert(idxInSection, element);
+        }catch(...){
+            for(size_t i = sectionIdx; i < lastUsedSectionIdx; ++i){
+                this->sections[i].append(this->sections[i + 1].remove(0));
+            }
+
+            size_t sectionsCountToRemove = (this->getAllocatedSize() - this->getSize()) / this->sectionSize;
+            for(size_t i = 0; i < sectionsCountToRemove; ++i){
+                this->sections.remove(this->sections.getSize() - 1);
+            }
+            throw;
+        }
+
+        this->setSize(++this->getSIze());
     }
 
-public:
-    template<enable_if_t<is_copy_assignable<T>::value&& is_copy_constructible<T>::value, bool> = true>
-    void insert(size_t idx, const T& element) override {
-        const T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place, bool assign) -> void {
-            if (assign) {
-                *place = *elementPtr;
-            }
-            else {
-                new (place) T(*elementPtr);
-            }
-            })
-    };
+    void insert(size_t idx, T&& element) {
+        if (idx > this->getSize()) {
+            throw out_of_range("idx argument is out of range");
+        }
+        if (this->getSize() == this->sectionSize * this->sections.getSize()) {
+            this->resize(this->getSize() + this->sectionSize);
+        }
 
-    void insert(size_t idx, T&& element) override {
-        T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place, bool assign) -> void {
-            if (assign) {
-                *place = move(*elementPtr);
-            }
-            else {
-                new (place) T(move(*elementPtr));
-            }
-            })
-    };
+        size_t sectionIdx = idx / this->sectionSize;
+        size_t idxInSection = idx % this->sectionSize;
 
+        Section& section = this->sections[sectionIdx];
+        if(section.getSize() < this->sectionSize){
+            section.insert(idxInSection, element);
+            this->setSize(++this->getSIze());
+            return;
+        }
+
+        size_t lastUsedSectionIdx = (this->getSize() + 1) / this->sectionSize;
+        for(size_t i = lastUsedSectionIdx; i > sectionIdx; --i){
+            Section& prevSection = this->sections[i - 1];
+            this->sections[i].insert(0, this->sections[i - 1].remove(this->sectionSize - 1))
+        }
+
+        section.insert(idxInSection, element);
+
+        this->setSize(++this->getSIze());
+    }
+    
     T remove(size_t idx) override {
         if (idx >= this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
-        T result(move((*this)[idx]));
-        for (size_t i = idx; i < this->getSize() - 1; ++i) {
-            size_t sectionIdx = i / this->sectionSize;
-            size_t sectionIdx2 = (i + 1) / this->sectionSize;
-            size_t idxInSection = i % this->sectionSize;
-            size_t idxInSection2 = (i + 1) % this->sectionSize;
-            *(this->sections[sectionIdx] + idxInSection) = move(*(this->sections[sectionIdx2] + idxInSection2));
+        size_t sectionIdx = idx / this->sectionSize;
+        size_t idxInSection = idx % this->sectionSize;
+
+        Section& section = this->sections[sectionIdx];
+        T result(section.remove(sectionIdx));
+
+        if(section.getSize() + 1 == this->sectionSize){
+            size_t lastUsedSectionIdx = (this->getSize() - 1) / this->sectionSize;
+            for(size_t i = sectionIdx; i < lastUsedSectionIdx; ++i){
+                this->sections[i].append(this->sections[i + 1].remove(0));
+            }
         }
+
         this->setSize(--this->getSize());
 
-        if (this->getSize() % this->sectionSize == 0) {
-            this->resize(this->getSize());
+        size_t sectionsCountToRemove = (this->getAllocatedSize() - this->getSize()) / this->sectionSize;
+        for(size_t i = 0; i < sectionsCountToRemove; ++i){
+            this->sections.remove(this->sections.getSize() - 1);
         }
 
         return result;

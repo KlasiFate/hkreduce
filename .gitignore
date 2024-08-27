@@ -31,10 +31,10 @@
 *.out
 *.app
 
-/test*
 /.vscode/tasks.json
 /.vscode/launch.json
 
 __pycache__
 /.venv
 /poetry.lock
+/output

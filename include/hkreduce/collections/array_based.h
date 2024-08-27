@@ -5,7 +5,6 @@
 
 #include "../allocators/abc.h"
 #include "../allocators/default.h"
-#include "../utils/raii.h"
 #include "./abc.h"
 #include "./constants.h"
 
@@ -281,7 +280,12 @@ public:
             throw out_of_range("Idx is out of range");
         }
         T old(move(this->array[idx]));
-        this->array[idx] = element;
+        try{
+            this->array[idx] = element;
+        }catch(...){
+            this->array[idx] = move(old);
+            throw;
+        }
         return old;
     }
 
