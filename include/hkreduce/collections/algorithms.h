@@ -2,13 +2,13 @@
 
 #include <functional>
 
-#include "../collections/abc.h"
+#include "../collections/array_based.h"
+#include "../collections/sectioned.h"
 
 
 using namespace std;
 
 
-// Для возможности специализации, при которой компилятор сможет сделать inline
 template<class T, class TCollection = IndexableCollection<T>>
 size_t bsearchLeft(
     TCollection* collection,
@@ -46,7 +46,6 @@ size_t bsearchLeft(
     return start;
 };
 
-
 template<class T, class TCollection = IndexableCollection<T>>
 size_t bsearchLeft(
     TCollection* collection,
@@ -57,8 +56,53 @@ size_t bsearchLeft(
     return bsearchLeft<T, TCollection>(
         collection,
         element,
-        [] (const T& middleElement, const T& element) {return middleElement <= element},
+        [] (const T& middleElement, const T& element) {return middleElement <= element;},
         start,
         stop
-    )
-}
+    );
+};
+
+
+template<class T>
+size_t bsearchLeft(
+    ArrayCollection<T>* collection,
+    const T& element,
+    function<bool(const T&, const T&)> compare,
+    size_t start = 0,
+    size_t stop = SIZE_MAX
+){
+    return bsearchLeft<T, ArrayCollection<T>>(collection, element, compare, start, stop);
+};
+
+
+template<class T>
+size_t bsearchLeft(
+    ArrayCollection<T>* collection,
+    const T& element,
+    size_t start = 0,
+    size_t stop = SIZE_MAX
+){
+    return bsearchLeft<T, ArrayCollection<T>>(collection, element, start, stop);
+};
+
+template<class T>
+size_t bsearchLeft(
+    SectionedCollection<T>* collection,
+    const T& element,
+    function<bool(const T&, const T&)> compare,
+    size_t start = 0,
+    size_t stop = SIZE_MAX
+){
+    return bsearchLeft<T, SectionedCollection<T>>(collection, element, compare, start, stop);
+};
+
+
+template<class T>
+size_t bsearchLeft(
+    SectionedCollection<T>* collection,
+    const T& element,
+    size_t start = 0,
+    size_t stop = SIZE_MAX
+){
+    return bsearchLeft<T, SectionedCollection<T>>(collection, element, start, stop);
+};

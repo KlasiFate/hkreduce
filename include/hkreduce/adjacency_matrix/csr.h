@@ -27,7 +27,7 @@ private:
 public:
     // TODO: add simple constructor based on sectioned collections
     CSRAdjacencyMatrix() :
-        ABCAdjacencyMatrix(0),
+        ABCAdjacencyMatrix<TCoef>(0),
         rows(nullptr),
         cols(nullptr),
         coefs(nullptr),
@@ -41,7 +41,7 @@ public:
         bool deleteCollections = true,
         Allocator* allocator = getDefaultAllocator()
     ) :
-        ABCAdjacencyMatrix(rows->getSize()),
+        ABCAdjacencyMatrix<TCoef>{rows->getSize()},
         rows(rows),
         cols(cols),
         coefs(coefs),
@@ -55,7 +55,7 @@ public:
     ) : CSRAdjacencyMatrix(rows, cols, coefs, true, getDefaultAllocator()) { };
 
     CSRAdjacencyMatrix(CSRAdjacencyMatrix<TCoef>&& other) :
-        ABCAdjacencyMatrix(other.getSize()),
+        ABCAdjacencyMatrix<TCoef>{other.getSize()},
         rows(other.rows),
         cols(other.cols),
         coefs(other.coefs),
@@ -192,17 +192,17 @@ public:
         _CSRNeighboursIterator<TCoef>* ptr = (_CSRNeighboursIterator<TCoef>*) allocator->allocate(sizeof(_CSRNeighboursIterator<TCoef>));
         new (ptr) _CSRNeighboursIterator<TCoef>(this, from, to);
 
-        return NeighboursIterator<TCoef>(iterator, allocator);
+        return NeighboursIterator<TCoef>::fromInnerIterator(ptr, allocator);
     };
 
-    void replaceNeighboursIterator(size_t from, size_t to = 0, NeighboursIterator<TCoef>& toReplace, Allocator* allocator = nullptr) override {
-        _CSRNeighboursIterator<TCoef>* iterator = (_CSRNeighboursIterator<TCoef>*) toReplace.getIterator();
+    void replaceNeighboursIterator(size_t from, size_t to, NeighboursIterator<TCoef>& toReplace, Allocator* allocator = nullptr) override {
+        if (from >= this->getSize() || to >= this->getSize()) {
+            throw out_of_range("Index is out of range");
+        }
+        _CSRNeighboursIterator<TCoef>* iterator = (_CSRNeighboursIterator<TCoef>*) toReplace.getInnerIterator();
         if (iterator == nullptr) {
             toReplace = this->getNeighboursIterator(from, to, allocator);
             return;
-        }
-        if (from >= this->getSize() || to >= this->getSize()) {
-            throw out_of_range("Index is out of range");
         }
         *iterator = _CSRNeighboursIterator<TCoef>(this, from, to);
     }
@@ -215,7 +215,8 @@ private:
     size_t idx;
     size_t from;
 
-    friend CSRAdjacencyMatrix<TCoef>::getNeighboursIterator(size_t, size_t, Allocator*);
+    friend NeighboursIterator<TCoef> CSRAdjacencyMatrix<TCoef>::getNeighboursIterator(size_t, size_t, Allocator*);
+    friend void CSRAdjacencyMatrix<TCoef>::replaceNeighboursIterator(size_t, size_t, NeighboursIterator<TCoef>&, Allocator*);
     _CSRNeighboursIterator(CSRAdjacencyMatrix<TCoef>* matrix, size_t from, size_t to) : _ABCNeighboursIterator<TCoef>(false, matrix) {
         IndexableCollection<size_t>& rows = *(matrix->getRows());
         IndexableCollection<size_t>& cols = *(matrix->getCols());
@@ -240,7 +241,7 @@ public:
     _CSRNeighboursIterator<TCoef>* copy(Allocator* allocator) const override {
         _CSRNeighboursIterator<TCoef>* ptr = (_CSRNeighboursIterator<TCoef>*) allocator->allocate(sizeof(_CSRNeighboursIterator<TCoef>));
         new (ptr) _CSRNeighboursIterator<TCoef>(*this);
-        return ptr
+        return ptr;
     }
 
     size_t getFrom() const override {
@@ -250,11 +251,11 @@ public:
         IndexableCollection<size_t>* cols = static_cast<CSRAdjacencyMatrix<TCoef>*>(this->getMatrix())->getCols();
         return (*cols)[this->idx];
     }
-    TCoef coef() const override {
+    TCoef getCoef() const override {
         IndexableCollection<TCoef>* coefs = static_cast<CSRAdjacencyMatrix<TCoef>*>(this->getMatrix())->getCoefs();
         return (*coefs)[this->idx];
     }
-    TCoef setCoef(TCoef coef) const override {
+    TCoef setCoef(TCoef coef) override {
         CSRAdjacencyMatrix<TCoef>* matrix = static_cast<CSRAdjacencyMatrix<TCoef>*>(this->getMatrix());
         IndexableCollection<size_t>& cols = *(matrix->getCols());
         IndexableCollection<TCoef>& coefs = *(matrix->getCoefs());

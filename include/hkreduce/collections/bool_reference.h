@@ -24,7 +24,7 @@ public:
     }
 
     BoolReference& operator=(const BoolReference& value) {
-        this->operator=((bool) value);
+        return this->operator=((bool) value);
     }
 
     BoolReference& operator=(bool value){

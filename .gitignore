@@ -37,4 +37,6 @@
 __pycache__
 /.venv
 /poetry.lock
+/cmake-trash
 /output
+/test*

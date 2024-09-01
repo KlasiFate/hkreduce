@@ -3,21 +3,19 @@
 #include <cstring>
 #include <functional>
 
-#include "../allocators/abc.h"
 #include "../allocators/default.h"
+#include "../utils/type_traits.h"
 #include "./abc.h"
 #include "./constants.h"
 
 
 using namespace std;
 
-// TODO: add check that collection is initialized
+template<class T, bool supports_copy_semantic = does_support_copy_semantic<T>::value>
+class ArrayCollection;
 
 template<class T>
-class ArrayCollection : public IndexableCollection<T> {
-    // For not overriding methods
-    static_assert(!is_same<T, bool>::value, "ArrayCollection is not best way to aggregate bool collections. Use Bitmap instead");
-
+class ArrayCollection<T, false> : public IndexableCollection<T> {
 protected:
     T* array;
     size_t allocated;
@@ -32,7 +30,7 @@ public:
         size_t initalizedElements,
         bool deleteArray,
         Allocator* allocator = getDefaultAllocator()
-    ) : IndexableCollection(size, allocator), array(array), allocated(allocated), deleteArray(deleteArray), initalizedElements(initalizedElements) { };
+    ) : IndexableCollection<T>(size, allocator), array(array), allocated(allocated), deleteArray(deleteArray), initalizedElements(initalizedElements) { };
 
     ArrayCollection(
         T* array,
@@ -61,12 +59,13 @@ public:
         const T& value,
         Allocator* allocator = getDefaultAllocator()
     ) : ArrayCollection(size, allocator) {
-        try{
+        try {
             for (; this->initalizedElements < size; ++this->initalizedElements) {
                 new (this->array + this->initalizedElements) T(value);
             }
             this->setSize(size);
-        }catch(...){
+        }
+        catch (...) {
             for (size_t i = 0; i < this->initalizedElements; ++i) {
                 this->array[i].~T();
             }
@@ -91,119 +90,10 @@ public:
         }
     }
 
-    template<enable_if_t<!is_copy_constructible<T>::value, bool> = true>
-    ArrayCollection(const ArrayCollection<T>& other) = delete;
+    ArrayCollection(const ArrayCollection<T, false>& other) = delete;
+    ArrayCollection& operator=(const ArrayCollection<T, false>& other) = delete;
 
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    ArrayCollection(const ArrayCollection<T>& other) : ArrayCollection(nullptr, other.allocated, 0, 0, true, other.getAllocator()) {
-        // Создание на основе копирования "пустой" коллекции
-        if (other.array == nullptr) {
-            this->deleteArray = false;
-            return;
-        }
-
-        this->array = (T*) this->getAllocator()->allocate(sizeof(T) * this->allocated);
-
-        if (is_trivial<T>::value) {
-            memcpy((void*) this->array, (void*) other.array, sizeof(T) * other.getSize());
-            return;
-        }
-
-        try{
-            for (; this->initalizedElements < other.getSize(); ++this->initalizedElements) {
-                // other.array has type "T*", so we should make element as const
-                const T& otherElement = other.array[i];
-                new (this->array + this->initalizedElements) T(otherElement);
-            }
-            this->setSize(other.getSize());
-        }catch(...){
-            for (size_t i = 0; i < this->initalizedElements; ++i) {
-                this->array[i].~T();
-            }
-            this->getAllocator()->deallocate((void*) this->array);
-            throw;
-        }
-    };
-
-    template<enable_if_t<!is_copy_constructible<T>::value, bool> = true>
-    ArrayCollection& operator=(const ArrayCollection<T>& other) = delete;
-
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    ArrayCollection& operator=(const ArrayCollection<T>& other) {
-        if (this == &other) {
-            return;
-        }
-
-        // Присвоение "пустой" коллекции
-        if (other.array == nullptr) {
-            if (this->array != nullptr) {
-                if (!is_trivial<T>::value) {
-                    for (size_t i = 0; i < this->initalizedElements; ++i) {
-                        this->array[i].~T();
-                    }
-                }
-                if (this->deleteArray) {
-                    this->getAllocator()->deallocate((void*) this->array);
-                }
-            }
-
-            this->array = nullptr;
-            this->allocated = 0;
-            this->setAllocator(nullptr);
-            this->deleteArray = false;
-            this->initalizedElements = 0;
-            this->setSize(0);
-            return;
-        }
-
-        T* newArray = other.getAllocator()->allocate(other.allocated);
-
-        if (is_trivial<T>::value) {
-            memcpy((void*) newArray, (void*) other.array, sizeof(T) * other.getSize());
-            this->array = newArray;
-            this->allocated = other.allocated;
-            this->setSize(other.getSize());
-            this->initalizedElements = other.getSize();
-            this->setAllocator(other.getAllocator());
-            this->deleteArray = true;
-            return;
-        }
-
-        size_t initalizedElements = 0;
-        try {
-            for (; initalizedElements < other.getSize(); ++initalizedElements) {
-                // Make element as const
-                const T& otherElement = other.array[i];
-                new (newArray + initalizedElements) T(otherElement);
-            }
-        }catch(...){
-            for (size_t i = 0; i < initalizedElements; ++i) {
-                newArray[i].~T();
-            }
-            other.getAllocator()->deallocate((void*) newArray);
-            throw;
-        }
-        
-        if (this->array != nullptr) {
-            if (!is_trivial<T>::value) {
-                for (size_t i = 0; i < this->initalizedElements; ++i) {
-                    this->array[i].~T();
-                }
-            }
-            if (this->deleteArray) {
-                this->getAllocator()->deallocate((void*) this->array);
-            }
-        }
-
-        this->array = newArray;
-        this->allocated = other.allocated;
-        this->setSize(other.getSize());
-        this->initalizedElements = other.getSize();
-        this->setAllocator(other.getAllocator());
-        this->deleteArray = true;
-    };
-
-    ArrayCollection(ArrayCollection<T>&& other) noexcept : ArrayCollection(other.array, other.allocated, other.getSize(), other.initalizedElements, other.deleteArray, other.getAllocator()) {
+    ArrayCollection(ArrayCollection<T, false>&& other) noexcept : ArrayCollection(other.array, other.allocated, other.getSize(), other.initalizedElements, other.deleteArray, other.getAllocator()) {
         other.deleteArray = false;
         other.array = nullptr;
         other.setSize(0);
@@ -214,7 +104,7 @@ public:
 
     ArrayCollection<T>& operator=(ArrayCollection<T>&& other) noexcept {
         if (this == &other) {
-            return;
+            return *this;
         }
 
         if (this->array != nullptr) {
@@ -262,31 +152,17 @@ public:
     }
 
     T& operator[](size_t idx) override {
-        if(idx >= this->getSize()){
-            throw out_of_range("Idx is out of range");
-        }
-        return this->array[idx];
-    }
-    const T& operator[](size_t idx) const override {
-        if(idx >= this->getSize()){
+        if (idx >= this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
         return this->array[idx];
     }
 
-    template<enable_if_t<is_copy_assignable<T>::value, bool> = true>
-    T replace(size_t idx, const T& element) override {
+    const T& operator[](size_t idx) const override {
         if (idx >= this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
-        T old(move(this->array[idx]));
-        try{
-            this->array[idx] = element;
-        }catch(...){
-            this->array[idx] = move(old);
-            throw;
-        }
-        return old;
+        return this->array[idx];
     }
 
     T replace(size_t idx, T&& element) override {
@@ -298,8 +174,8 @@ public:
         return old;
     }
 
-private:
-    void insert(size_t idx, function<void(T*, bool)> assignOrConstruct) {
+protected:
+    void insertUsingFunction(size_t idx, function<void(T*, bool)> assignOrConstruct) {
         if (this->getSize() == this->allocated) {
             throw invalid_argument("No space to insert");
         }
@@ -321,17 +197,18 @@ private:
                 this->setSize(++this->initalizedElements);
                 return;
             }
-            
+
             new (this->array + this->getSize()) T(move(this->array[this->getSize() - 1]));
             for (size_t i = this->getSize() - 1; i > idx; --i) {
                 this->array[i] = move(this->array[i - 1]);
             }
             ++this->initalizedElements;
 
-            try{
+            try {
                 assignOrConstruct(this->array + idx, true);
-            }catch(...){
-                for(size_t i = idx; i < this->getSize(); ++i){
+            }
+            catch (...) {
+                for (size_t i = idx; i < this->getSize(); ++i) {
                     this->array[i] = move(this->array[i + 1]);
                 }
                 throw;
@@ -344,11 +221,12 @@ private:
         for (size_t i = this->getSize(); i > idx; --i) {
             this->array[i] = move(this->array[i - 1]);
         }
-        
-        try{
+
+        try {
             assignOrConstruct(this->array + idx, true);
-        }catch(...){
-            for(size_t i = idx; i < this->getSize(); ++i){
+        }
+        catch (...) {
+            for (size_t i = idx; i < this->getSize(); ++i) {
                 this->array[i] = move(this->array[i + 1]);
             }
             throw;
@@ -358,29 +236,16 @@ private:
     }
 
 public:
-    template<enable_if_t<is_copy_assignable<T>::value&& is_copy_constructible<T>::value, bool> = true>
-    void insert(size_t idx, const T& element) override {
-        const T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place, bool assign) -> void {
-            if (assign) {
-                *place = *elementPtr;
-            }
-            else {
-                new (place) T(*elementPtr);
-            }
-            })
-    }
-
     void insert(size_t idx, T&& element) override {
         T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place, bool assign) -> void {
+        this->insertUsingFunction(idx, [elementPtr] (T* place, bool assign) -> void {
             if (assign) {
                 *place = move(*elementPtr);
             }
             else {
                 new (place) T(move(*elementPtr));
             }
-            })
+            });
     }
 
     T remove(size_t idx) override {
@@ -407,105 +272,186 @@ public:
 
 
 template<class T>
-class DArrayCollection : public ArrayCollection<T> {
-private:
-    size_t blockSize;
-
+class ArrayCollection<T, true> : public ArrayCollection<T, false> {
 public:
-    DArrayCollection(
-        T* array,
-        size_t allocated,
-        size_t size,
-        size_t wasInitalized,
-        bool deleteArray,
-        Allocator* allocator = getDefaultAllocator(),
-        size_t blockSize = DEFAULT_BLOCK_SIZE
-    ) : ArrayCollection(array, allocated, size, wasInitalized, deleteArray, allocator), blockSize(blockSize) {
-        if (blockSize == 0) {
-            throw invalid_argument("Block size argument equals zero");
-        }
-    }
+    using ArrayCollection<T, false>::ArrayCollection;
 
-    DArrayCollection(
-        T* array,
-        size_t allocated,
-        size_t size,
-        bool deleteArray,
-        Allocator* allocator = getDefaultAllocator(),
-        size_t blockSize = DEFAULT_BLOCK_SIZE
-    ) : ArrayCollection(array, allocated, size, deleteArray, allocator), blockSize(blockSize) {
-        if (blockSize == 0) {
-            throw invalid_argument("Block size argument equals zero");
-        }
-    };
-
-    DArrayCollection(
-        T* array,
-        size_t size,
-        Allocator* allocator = getDefaultAllocator(),
-        size_t blockSize = DEFAULT_BLOCK_SIZE
-    ) : ArrayCollection(array, size, allocator), blockSize(blockSize) {
-        if (blockSize == 0) {
-            throw invalid_argument("Block size argument equals zero");
-        }
-    };
-
-    DArrayCollection(
-        size_t allocated,
-        Allocator* allocator = getDefaultAllocator(),
-        size_t blockSize = DEFAULT_BLOCK_SIZE
-    ) : ArrayCollection(allocated, allocator), blockSize(blockSize) { 
-        if (blockSize == 0) {
-            this->getAllocator()->deallocate(this->array);
-            throw invalid_argument("Block size argument equals zero");
-        }
-    }
-
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    DArrayCollection(
+    ArrayCollection(
         size_t size,
         const T& value,
-        Allocator* allocator = getDefaultAllocator(),
-        size_t blockSize = DEFAULT_BLOCK_SIZE
-    ) : ArrayCollection(size, value, allocator), blockSize(blockSize) {
-        if (blockSize == 0) {
-            if(!is_trivial<T>::value){
-                for(size_t i = 0; i < size; ++i){
+        Allocator* allocator = getDefaultAllocator()
+    ) : ArrayCollection(size, allocator) {
+        try {
+            for (; this->initalizedElements < size; ++this->initalizedElements) {
+                new (this->array + this->initalizedElements) T(value);
+            }
+            this->setSize(size);
+        }
+        catch (...) {
+            for (size_t i = 0; i < this->initalizedElements; ++i) {
+                this->array[i].~T();
+            }
+            this->getAllocator()->deallocate(this->array);
+            throw;
+        }
+    }
+
+    ArrayCollection(const ArrayCollection<T, true>& other) : ArrayCollection(nullptr, other.allocated, 0, 0, true, other.getAllocator()) {
+        // Создание на основе копирования "пустой" коллекции
+        if (other.array == nullptr) {
+            this->deleteArray = false;
+            return;
+        }
+
+        this->array = (T*) this->getAllocator()->allocate(sizeof(T) * this->allocated);
+
+        if (is_trivial<T>::value) {
+            memcpy((void*) this->array, (void*) other.array, sizeof(T) * other.getSize());
+            return;
+        }
+
+        size_t initalizedElements = 0;
+        try {
+            for (; initalizedElements < other.getSize(); ++initalizedElements) {
+                // other.array has type "T*", so we should make element as const
+                const T& otherElement = other.array[initalizedElements];
+                new (this->array + initalizedElements) T(otherElement);
+            }
+            this->setSize(other.getSize());
+            this->initalizedElements = initalizedElements;
+        }
+        catch (...) {
+            for (size_t i = 0; i < initalizedElements; ++i) {
+                this->array[i].~T();
+            }
+            this->getAllocator()->deallocate((void*) this->array);
+            throw;
+        }
+    };
+
+    ArrayCollection& operator=(const ArrayCollection<T, true>& other) {
+        if (this == &other) {
+            return *this;
+        }
+
+        // Присвоение "пустой" коллекции
+        if (other.array == nullptr) {
+            if (this->array != nullptr) {
+                if (!is_trivial<T>::value) {
+                    for (size_t i = 0; i < this->initalizedElements; ++i) {
+                        this->array[i].~T();
+                    }
+                }
+                if (this->deleteArray) {
+                    this->getAllocator()->deallocate((void*) this->array);
+                }
+            }
+
+            this->array = nullptr;
+            this->allocated = 0;
+            this->setAllocator(nullptr);
+            this->deleteArray = false;
+            this->initalizedElements = 0;
+            this->setSize(0);
+            return *this;
+        }
+
+        T* newArray = (T*) other.getAllocator()->allocate(other.allocated);
+
+        if (is_trivial<T>::value) {
+            memcpy((void*) newArray, (void*) other.array, sizeof(T) * other.getSize());
+            this->array = newArray;
+            this->allocated = other.allocated;
+            this->setSize(other.getSize());
+            this->initalizedElements = other.getSize();
+            this->setAllocator(other.getAllocator());
+            this->deleteArray = true;
+            return *this;
+        }
+
+        size_t initalizedElements = 0;
+        try {
+            for (; initalizedElements < other.getSize(); ++initalizedElements) {
+                // Make element as const
+                const T& otherElement = other.array[initalizedElements];
+                new (newArray + initalizedElements) T(otherElement);
+            }
+        }
+        catch (...) {
+            for (size_t i = 0; i < initalizedElements; ++i) {
+                newArray[i].~T();
+            }
+            other.getAllocator()->deallocate((void*) newArray);
+            throw;
+        }
+
+        if (this->array != nullptr) {
+            if (!is_trivial<T>::value) {
+                for (size_t i = 0; i < this->initalizedElements; ++i) {
                     this->array[i].~T();
                 }
             }
-            this->getAllocator()->deallocate(this->array);
-            throw invalid_argument("Block size argument equals zero");
+            if (this->deleteArray) {
+                this->getAllocator()->deallocate((void*) this->array);
+            }
         }
-    }
 
-    DArrayCollection() : ArrayCollection(), blockSize(0) { }
-
-    template<enable_if_t<!is_copy_constructible<T>::value, bool> = true>
-    DArrayCollection(const DArrayCollection<T>& other) = delete;
-
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    DArrayCollection(const DArrayCollection<T>& other) : ArrayCollection(other), blockSize(other.blockSize) { };
-
-    template<enable_if_t<!is_copy_constructible<T>::value, bool> = true>
-    DArrayCollection& operator=(const DArrayCollection<T>& other) = delete;
-
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    DArrayCollection& operator=(const DArrayCollection<T>& other) {
-        ArrayCollection<T>::operator=(other);
-        this->blockSize = other.blockSize;
+        this->array = newArray;
+        this->allocated = other.allocated;
+        this->setSize(other.getSize());
+        this->initalizedElements = other.getSize();
+        this->setAllocator(other.getAllocator());
+        this->deleteArray = true;
+        return *this;
     };
 
-    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection(other), blockSize(other.blockSize) { };
+    T replace(size_t idx, const T& element) override {
+        if (idx >= this->getSize()) {
+            throw out_of_range("Idx is out of range");
+        }
+        T old(move(this->array[idx]));
+        try {
+            this->array[idx] = element;
+        }
+        catch (...) {
+            this->array[idx] = move(old);
+            throw;
+        }
+        return old;
+    }
 
-    DArrayCollection<T>& operator=(DArrayCollection<T>&& other) noexcept {
+    void insert(size_t idx, const T& element) override {
+        const T* elementPtr = &element;
+        this->insertUsingFunction(idx, [elementPtr] (T* place, bool assign) -> void {
+            if (assign) {
+                *place = *elementPtr;
+            }
+            else {
+                new (place) T(*elementPtr);
+            }
+            });
+    }
+};
+
+
+template<class T>
+class DArrayCollectionCommonMethods : virtual public ArrayCollection<T> {
+protected:
+    size_t blockSize;
+
+    DArrayCollectionCommonMethods(size_t blockSize) : blockSize(blockSize) { }
+
+public:
+    DArrayCollectionCommonMethods<T>& operator=(DArrayCollectionCommonMethods<T>&& other) noexcept {
         ArrayCollection<T>::operator=(other);
         this->blockSize = other.blockSize;
+        return *this;
     };
 
     size_t getBlockSize() const {
         return this->blockSize;
     }
+
     void setBlockSize(size_t blockSize) {
         if (blockSize == 0) {
             throw invalid_argument("Block size equals zero");
@@ -513,7 +459,7 @@ public:
         this->blockSize = blockSize;
     }
 
-    void resize(size newSpaceSize) override {
+    void resize(size_t newSpaceSize) override {
         if (newSpaceSize == this->allocated) {
             return;
         }
@@ -534,7 +480,7 @@ public:
             this->deleteArray = true;
             return;
         }
-        
+
         for (size_t i = 0; i < this->getSize(); ++i) {
             new (newArray + i) T(move(this->array[i]));
         }
@@ -551,13 +497,13 @@ public:
         this->deleteArray = true;
     }
 
-private:
+protected:
     size_t calcNewSpaceSize(size_t size) const {
         size_t newSpaceSize = size / this->blockSize + (size % this->blockSize == 0 ? 0 : 1);
         return newSpaceSize * this->blockSize;
     }
 
-    void insert(size idx, function<void(T*)> constructAtPlace) {
+    void insertUsingFunction(size_t idx, function<void(T*)> constructAtPlace) {
         if (idx > this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
@@ -583,10 +529,11 @@ private:
         for (size_t i = 0; i < idx; ++i) {
             new (newArray + i) T(move(this->array[i]));
         }
-        try{
+        try {
             constructAtPlace(newArray + idx);
-        }catch(...){
-            for(size_t i = 0; i < idx; ++i){
+        }
+        catch (...) {
+            for (size_t i = 0; i < idx; ++i) {
                 this->array[i] = move(newArray[i]);
                 newArray[i].~T();
             }
@@ -613,28 +560,19 @@ private:
     }
 
 public:
-    template<enable_if_t<is_copy_assignable<T>::value&& is_copy_constructible<T>::value, bool> = true>
-    void insert(size_t idx, const T& element) override {
-        if (this->getSize() < this->allocated) {
-            return ArrayCollection<T>::insert(idx, element);
-        }
-        const T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place) -> void {new (place) T(*elementPtr)})
-    }
-
     void insert(size_t idx, T&& element) override {
         if (this->getSize() < this->allocated) {
             return ArrayCollection<T>::insert(idx, element);
         }
         T* elementPtr = &element;
-        this->insert(idx, [elementPtr] (T* place) -> void {new (place) T(move(*elementPtr))})
+        this->insertUsingFunction(idx, [elementPtr] (T* place) -> void {new (place) T(move(*elementPtr));});
     }
 
     T remove(size_t idx) override {
-        if(this->allocated - this->getSize() + 1 < this->getBlockSize()){
+        if (this->allocated - this->getSize() + 1 < this->getBlockSize()) {
             return ArrayCollection<T>::remove(idx);
         }
-        if(idx >= this->getSize()){
+        if (idx >= this->getSize()) {
             throw out_of_range("idx is out of range");
         }
 
@@ -643,38 +581,38 @@ public:
         this->setSize(this->getSize() - 1);
 
         size_t newSpaceSize = this->getSize() / this->getBlockSize();
-        if(this->getSize() % this->getBlockSize() > 0){
+        if (this->getSize() % this->getBlockSize() > 0) {
             ++newSpaceSize;
         }
         newSpaceSize *= this->getBlockSize();
 
-        T* newArray = this->getAllocator()->allocate(newSpaceSize);
-        
-        if(is_trivial<T>::value){
+        T* newArray = (T*) this->getAllocator()->allocate(newSpaceSize);
+
+        if (is_trivial<T>::value) {
             memcpy((void*) newArray, (void*) this->array, sizeof(T) * idx);
             memcpy((void*) (newArray + idx), (void*) (this->array + idx + 1), sizeof(T) * (this->getSize() - idx));
-            if(this->deleteArray){
+            if (this->deleteArray) {
                 this->getAllocator()->deallocate((void*) this->array);
             }
             this->array = newArray;
             this->initalizedElements = this->getSize();
             this->allocated = newSpaceSize;
             this->deleteArray = true;
-            return;
+            return old;
         }
 
-        for(size_t i = 0; i < idx; ++i){
+        for (size_t i = 0; i < idx; ++i) {
             new (newArray + i) T(move(this->array[i]));
         }
-        for(size_t i = idx; i < this->getSize(); ++i){
+        for (size_t i = idx; i < this->getSize(); ++i) {
             new (newArray + i) T(move(this->array[i + 1]));
         }
 
-        for(size_t i = 0; i < this->initalizedElements; ++i){
+        for (size_t i = 0; i < this->initalizedElements; ++i) {
             this->array[i].~T();
         }
 
-        if(this->deleteArray){
+        if (this->deleteArray) {
             this->getAllocator()->deallocate((void*) this->array);
         }
 
@@ -684,5 +622,179 @@ public:
         this->deleteArray = true;
 
         return old;
+    }
+};
+
+
+template<class T, bool supports_copy_semantic = does_support_copy_semantic<T>::value>
+class DArrayCollection;
+
+
+template<class T>
+class DArrayCollection<T, false> : public DArrayCollectionCommonMethods<T> {
+public:
+    DArrayCollection(
+        T* array,
+        size_t allocated,
+        size_t size,
+        size_t wasInitalized,
+        bool deleteArray,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, allocated, size, wasInitalized, deleteArray, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    }
+
+    DArrayCollection(
+        T* array,
+        size_t allocated,
+        size_t size,
+        bool deleteArray,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, allocated, size, deleteArray, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    };
+
+    DArrayCollection(
+        T* array,
+        size_t size,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, size, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    };
+
+    DArrayCollection(
+        size_t allocated,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(allocated, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            this->getAllocator()->deallocate(this->array);
+            throw invalid_argument("Block size argument equals zero");
+        }
+    }
+
+    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
+
+    DArrayCollection() : ArrayCollection<T>(), DArrayCollectionCommonMethods<T>(0) { }
+
+    DArrayCollection<T, false>& operator=(DArrayCollection<T, false>&& other) {
+        DArrayCollectionCommonMethods<T>::operator=(move(other));
+        return *this;
+    }
+
+    DArrayCollection(const DArrayCollection<T>& other) = delete;
+
+    DArrayCollection<T, false>& operator=(const DArrayCollection<T, false>& other) = delete;
+};
+
+
+template<class T>
+class DArrayCollection<T, true> : public DArrayCollectionCommonMethods<T> {
+public:
+    // 
+    // ------ START OF COPIED CODE ------
+    // 
+    DArrayCollection(
+        T* array,
+        size_t allocated,
+        size_t size,
+        size_t wasInitalized,
+        bool deleteArray,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, allocated, size, wasInitalized, deleteArray, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    }
+
+    DArrayCollection(
+        T* array,
+        size_t allocated,
+        size_t size,
+        bool deleteArray,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, allocated, size, deleteArray, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    };
+
+    DArrayCollection(
+        T* array,
+        size_t size,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(array, size, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            throw invalid_argument("Block size argument equals zero");
+        }
+    };
+
+    DArrayCollection(
+        size_t allocated,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(allocated, allocator), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            this->getAllocator()->deallocate(this->array);
+            throw invalid_argument("Block size argument equals zero");
+        }
+    }
+
+    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
+
+    DArrayCollection() : ArrayCollection<T>(), DArrayCollectionCommonMethods<T>(0) { }
+
+    DArrayCollection<T, true>& operator=(DArrayCollection<T, true>&& other) {
+        DArrayCollectionCommonMethods<T>::operator=(move(other));
+        return *this;
+    }
+
+
+    // 
+    // ------ END OF COPIED CODE ------
+    // 
+
+    DArrayCollection(const DArrayCollection<T>& other) : ArrayCollection<T>(other), DArrayCollectionCommonMethods<T>(other.blockSize) { };
+
+    DArrayCollection(
+        size_t size,
+        const T& value,
+        Allocator* allocator = getDefaultAllocator(),
+        size_t blockSize = DEFAULT_BLOCK_SIZE
+    ) : ArrayCollection<T>(size, value, allocator, blockSize), DArrayCollectionCommonMethods<T>(blockSize) {
+        if (blockSize == 0) {
+            if (!is_trivial<T>::value) {
+                for (size_t i = 0; i < size; ++i) {
+                    this->array[i].~T();
+                }
+            }
+            this->getAllocator()->deallocate(this->array);
+            throw invalid_argument("Block size argument equals zero");
+        }
+    }
+
+    DArrayCollection<T, true>& operator=(const DArrayCollection<T, true>& other) {
+        ArrayCollection<T>::operator=(other);
+        this->blockSize = other.blockSize;
+    };
+
+    void insert(size_t idx, const T& element) override {
+        if (this->getSize() < this->allocated) {
+            return ArrayCollection<T>::insert(idx, element);
+        }
+        const T* elementPtr = &element;
+        this->insertUsingFunction(idx, [elementPtr] (T* place) -> void {new (place) T(*elementPtr);});
     }
 };

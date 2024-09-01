@@ -2,20 +2,24 @@
 
 #include <cstddef>
 #include <stdexcept>
-#include <type_traits>
 
 #include "./bool_reference.h"
 #include "../allocators/abc.h"
+#include "../utils/type_traits.h"
 
 using namespace std;
 
 
-template<class T>
-class IndexableCollection {
-    // TODO: add check for that move constructor and move operator= are noexcept for strong exception guarantee of collections
-    // TODO: add docs that copy operator= must implement strong exception guarantee
+template<class T, bool supports_copy_semantic = does_support_copy_semantic<T>::value>
+class IndexableCollectionTemplate;
 
-    static_assert(is_move_assignable<T>::value && is_move_constructible<T>::value, "Provided template class T is not support move semantic");
+
+template<class T>
+class IndexableCollectionTemplate<T, false> {
+    // TODO: add docs that move constructor and move operator= of T should be noexcept for strong exception guarantee of collections
+    // TODO: add docs that copy operator= should implement strong exception guarantee
+
+    static_assert(does_support_move_semantic<T>::value, "Provided template argument T does not support move semantic");
     
 private:
     size_t size;
@@ -29,21 +33,24 @@ protected:
         this->allocator = allocator;
     }
 
-    IndexableCollection(size_t size, Allocator* allocator): size(size), allocator(allocator) {}
+    IndexableCollectionTemplate(size_t size, Allocator* allocator): size(size), allocator(allocator) {};
+
+    IndexableCollectionTemplate(): size(0){};
 
 public:
-    IndexableCollection(): size(0){}
-    virtual ~IndexableCollection(){};
+    virtual ~IndexableCollectionTemplate(){};
     
     size_t getSize() const {
         return this->size;
     };
     
-    // Для данного геттера нет поля, тк кол-во аллоцированного пространства можно хранить по-разному и оно может быть вычислено 
+    // Для данного геттера нет поля, тк кол-во аллоцированного пространства можно хранить по-разному
+    // и оно может быть вычислено 
     virtual size_t getAllocatedSize() const = 0;
 
     Allocator* getAllocator() const;
     
+    // Не все коллекции предоставляют возможность resize. Так что данный метод является опциональным для реализации
     virtual void resize(size_t size) {
         if(size < this->size){
             throw invalid_argument("Invalid size argument. It is less than size of the collection");
@@ -56,36 +63,45 @@ public:
     virtual T& operator[](size_t idx) = 0;
     virtual const T& operator[](size_t idx) const = 0;
     
-    virtual T& at(size_t idx){
-        if(idx >= this->getSize()){
-            throw out_of_range("Idx is out of range");
-        }
+    // Просто alias для удобства
+    T& at(size_t idx){
         return (*this)[idx];
     }
-    virtual const T& at(size_t idx) const {
-        if(idx >= this->getSize()){
-            throw out_of_range("Idx is out of range");
-        }
+    const T& at(size_t idx) const {
         return (*this)[idx];
     }
     
-    template<enable_if_t<is_copy_assignable<T>::value && is_move_constructible<T>::value, bool> = true>
-    virtual T replace(size_t idx, const T& element) = 0;
     virtual T replace(size_t idx, T&& element) = 0;
     
-    template<enable_if_t<is_copy_assignable<T>::value && is_copy_constructible<T>::value, bool> = true>
-    virtual void insert(size_t idx, const T& element) = 0;
     virtual void insert(size_t idx, T&& element) = 0;
     
-    template<enable_if_t<is_copy_assignable<T>::value && is_copy_constructible<T>::value, bool> = true>
-    virtual void append(const T& element) {
-        this->insert(this->size(), element);
-    };
-    virtual void append(T&& element) {
+    void append(T&& element) {
         this->insert(this->size(), element);
     };
     
     virtual T remove(size_t idx) = 0;
+};
+
+
+template<class T>
+class IndexableCollectionTemplate<T, true>: public IndexableCollectionTemplate<T, false> {
+protected:
+    using IndexableCollectionTemplate<T, false>::IndexableCollectionTemplate;
+public:
+    virtual T replace(size_t idx, const T& element) = 0;
+    
+    virtual void insert(size_t idx, const T& element) = 0;
+    
+    void append(const T& element) {
+        this->insert(this->getSize(), element);
+    };
+};
+
+
+template<class T>
+class IndexableCollection: public IndexableCollectionTemplate<T, does_support_copy_semantic<T>::value> {
+protected:
+    using IndexableCollectionTemplate<T, does_support_copy_semantic<T>::value>::IndexableCollectionTemplate;
 };
 
 
@@ -130,16 +146,16 @@ public:
     virtual BoolReference operator[](size_t idx) = 0;
     virtual const BoolReference operator[](size_t idx) const = 0;
 
-    virtual BoolReference at(size_t idx) {
+    BoolReference at(size_t idx) {
         return (*this)[idx];
     };
-    virtual const BoolReference at(size_t idx) const {
+    const BoolReference at(size_t idx) const {
         return (*this)[idx];
     };
     
     virtual bool replace(size_t idx, bool element) = 0;
     virtual void insert(size_t idx, bool element) = 0;
-    virtual void append(bool element) {
+    void append(bool element) {
         this->insert(this->getSize(), element);
     };
     virtual bool remove(size_t idx) = 0;

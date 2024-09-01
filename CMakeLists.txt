@@ -2,10 +2,6 @@ cmake_minimum_required(VERSION 3.28)
 
 project("hkreduce")
 
-
-set(PROJECT_BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/output)
-
-
 # Добавляем папку наших модулей
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake-modules ${CMAKE_MODULE_PATH})
 
@@ -21,8 +17,12 @@ if(NOT Python_NumPy_FOUND)
     message(FATAL_ERROR "NumPy is not found")
 endif()
 
-set(OUTPUT_DIR ${PROJECT_SOURCE_DIR}/output)
 
+
+set(OUTPUT_DIR ${PROJECT_SOURCE_DIR}/output)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${OUTPUT_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${OUTPUT_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR}/bin)
 
 
 add_subdirectory(src)

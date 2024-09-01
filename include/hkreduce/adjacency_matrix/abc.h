@@ -46,7 +46,7 @@ public:
 
     virtual NeighboursIterator<TCoef> getNeighboursIterator(size_t from, size_t to = 0, Allocator* allocator = nullptr) = 0;
 
-    virtual void replaceNeighboursIterator(size_t from, size_t to = 0, NeighboursIterator<TCoef>& toReplace, Allocator* allocator = nullptr) {
+    virtual void replaceNeighboursIterator(size_t from, size_t to, NeighboursIterator<TCoef>& toReplace, Allocator* allocator = nullptr) {
         toReplace = this->getNeighboursIterator(from, to, allocator);
     };
 };
@@ -56,30 +56,32 @@ template <class TCoef = float>
 class _ABCNeighboursIterator {
 private:
     bool stopped;
-    ABCAdjacencyMatrix* matrix;
+    ABCAdjacencyMatrix<TCoef>* matrix;
+
 protected:
     void setStopped(bool stopped) {
         this->stopped = stopped;
     }
-    _ABCNeighboursIterator(bool stopped, ABCAdjacencyMatrix* matrix) : stopped(stopped), matrix(matrix) { };
+    _ABCNeighboursIterator(bool stopped, ABCAdjacencyMatrix<TCoef>* matrix) : stopped(stopped), matrix(matrix) { };
+
 public:
-    virtual _ABCNeighboursIterator<TCoef>* copy(Allocator* allocator) = 0;
+    virtual _ABCNeighboursIterator<TCoef>* copy(Allocator* allocator) const = 0;
     virtual ~_ABCNeighboursIterator() { };
 
     bool getStopped() const {
         return this->stopped;
     };
-    ABCAdjacencyMatrix* getMatrix() const {
+    ABCAdjacencyMatrix<TCoef>* getMatrix() const {
         return this->matrix;
     }
     virtual size_t getFrom() const = 0;
     virtual size_t getTo() const = 0;
     virtual TCoef getCoef() const {
-        return this->matrix->get(this->from(), this->to());
+        return this->matrix->getCoef(this->getFrom(), this->getTo());
     }
-    virtual TCoef setCoef(TCoef coef) const {
+    virtual TCoef setCoef(TCoef coef) {
         TCoef old = this->getCoef();
-        this->matrix->set(this->from(), this->to(), coef);
+        this->matrix->setCoef(this->getFrom(), this->getTo(), coef);
         if (coef == 0) {
             this->setStopped(true);
         }
@@ -109,7 +111,7 @@ public:
     }
     NeighboursIterator& operator=(const NeighboursIterator<TCoef>& other) {
         if (&other == this) {
-            return;
+            return *this;
         }
 
         if (this->iterator != nullptr) {
@@ -124,7 +126,7 @@ public:
     }
     NeighboursIterator& operator=(NeighboursIterator<TCoef>&& other) {
         if (&other == this) {
-            return;
+            return *this;
         }
 
         if (this->iterator != nullptr) {
@@ -151,19 +153,21 @@ public:
     };
 
 private:
-    friend ABCAdjacencyMatrix<TCoef>::getNeighboursIterator(size_t, size_t, Allocator*);
     NeighboursIterator(
-        _ABCNeighboursIterator* iterator,
+        _ABCNeighboursIterator<TCoef>* iterator,
         Allocator* allocator
     ) :
         iterator(iterator),
         allocator(allocator) { }
 
-    friend ABCAdjacencyMatrix<TCoef>::replaceNeighboursIterator(size_t, size_t, NeighboursIterator<TCoef>, Allocator*);
-    _ABCNeighboursIterator<TCoef>* getIterator(){
+public:
+    static NeighboursIterator<TCoef> fromInnerIterator(_ABCNeighboursIterator<TCoef>* iterator, Allocator* allocator) {
+        return NeighboursIterator<TCoef>(iterator, allocator);
+    }
+    _ABCNeighboursIterator<TCoef>* getInnerIterator(){
         return this->iterator;
     }
-public:
+
     NeighboursIterator<TCoef> operator++(int) {
         _ABCNeighboursIterator<TCoef>* old = this->iterator->copy(this->allocator);
         ++(*this->iterator);

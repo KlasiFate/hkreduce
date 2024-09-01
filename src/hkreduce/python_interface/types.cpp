@@ -1,11 +1,10 @@
-#pragma once
-
 #define PY_SSIZE_T_CLEAN
 
 #include <cstddef>
 #include <cstring>
 
 #include "Python.h"
+#include "structmember.h"
 #include "numpy/ndarrayobject.h"
 #include "numpy/ndarraytypes.h"
 
@@ -64,7 +63,7 @@ static int CSRAdjacencyMatrixObject_init(CSRAdjacencyMatrixObject* self, PyObjec
         new (rows) ArrayCollection<size_t>(size, 0, allocator);
         new (cols) SectionedCollection<size_t>(0, allocator);
         new (coefs) SectionedCollection<double>(0, allocator);
-        new (self->matrix) CSRAdjacencyMatrix<double>(rows, cols, coefs, allocator, true);
+        new (self->matrix) CSRAdjacencyMatrix<double>(rows, cols, coefs, true, allocator);
     }catch(bad_alloc& error){
         return -1;
     }
@@ -156,6 +155,8 @@ static PyObject* CSRAdjacencyMatrixObject_run(CSRAdjacencyMatrixObject* self, Py
     }else{
         // run
     }
+
+    return Py_None;
 };
 
 static PyMemberDef CSRAdjacencyMatrixObject_members[] = {
