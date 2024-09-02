@@ -108,7 +108,8 @@ public:
     Bitmap run(
         ABCAdjacencyMatrix<TCoef>& matrix, 
         IndexableCollection<size_t>& sources, 
-        TCoef threshold, Allocator* allocator
+        TCoef threshold, 
+        Allocator* allocator
     ) const {
         this->removeEdges(matrix, threshold);
 

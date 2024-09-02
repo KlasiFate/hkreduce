@@ -1,66 +1,178 @@
 #pragma once
-#include "vector"
-#include "stdlib.h"
+// #include <cstdlib>
+#include <cstring>
 
 #include "../adjacency_matrix/abc.h"
 #include "../collections/array_based.h"
+#include "../collections/algorithms.h"
+#include "../collections/bitmap.h"
 
+
+using namespace std;
 
 template<class TCoef>
 class DRGEP {
 private:
-    void _insert(ArrayCollection<TCoef>& paths_lengths, std::size node) {
-        TCoef path_length = paths_lengths[node];
-        std::size_t idx = queue->size();
-        // allocate space
-        queue.append(0);
-        for (; idx > 0; --idx) {
-            if (path_length <= paths_lengths[queue[idx - 1]]) {
-                break;
-            }
-            else {
-                queue[idx] = queue[idx - 1];
-            }
-        }
-        queue[idx] = node;
+    void insertToOrderedQueue(
+        ArrayCollection<size_t>& orderedQueue,
+        ArrayCollection<TCoef>& pathsLengths,
+        size_t node
+    ) const {
+        
+
+        size_t idxToInsert = bsearchLeftToInsert<size_t>(
+            &orderedQueue,
+            node,
+            compare
+        );
+
+        orderedQueue.insert(idxToInsert, node);
     }
 
-    void _update(){}
+    void updateQueue(
+        ArrayCollection<size_t>& orderedQueue,
+        ArrayCollection<TCoef>& pathsLengths,
+        size_t node
+    ) const {
+        function<bool(const size_t&, const size_t&)> compareToInsert = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+            TCoef middleElementPath = pathsLengths[middleElement];
+            TCoef elementPath = pathsLengths[element];
+            if(middleElementPath < elementPath){
+                return true;
+            }
+            if(middleElementPath > elementPath){
+                return false;
+            }
+            if(middleElement <= element){
+                return true;
+            }
+            return false;
+        };
 
-    std::vector<TCoef> _run_and_return_paths(ABCAdjacencyMatrix<TCoef>& matrix, std::size_t from, TCoef threshold) const {
-        std::size_t* queue_array = new std::size_t[matrix.getSize()];
-        ArrayCollection<std::size_t> ordered_queue(queue_array, matrix.getSize(), 0, true);
+        size_t idxToInsert = bsearchLeftToInsert<size_t>(
+            &orderedQueue,
+            node,
+            compareToInsert
+        );
 
-        TCoef* paths_lengths_array = new TCoef[matrix.getSize()];
-        ArrayCollection<TCoef> paths_lengths(paths_lengths_array, matrix.getSize(), matrix.getSize(), true);
+        if(pathsLengths[node] == 0){
+            throw invalid_argument("No provided node in ordered queue");
+        }
 
-        ordered_queue.append(from);
-        paths_lengths[from] = 1;
+        function<int(const size_t&, const size_t&)> compareToSearch = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+            TCoef middleElementPath = pathsLengths[middleElement];
+            TCoef elementPath = pathsLengths[element];
+            if(middleElementPath < elementPath){
+                return 1;
+            }
+            if(middleElementPath > elementPath){
+                return -1;
+            }
+            if(middleElement < element){
+                return 1;
+            }
+            if(middleElement > element){
+                return -1;
+            }
+            return 0;
+        };
+
+        size_t currentIdx = bsearchLeft<size_t>(
+            &orderedQueue,
+            node,
+            compareToSearch
+        );     
+
+        if(currentIdx == SIZE_MAX){
+            throw invalid_argument("No provided node in ordered queue");
+        }   
+
+        if(currentIdx + 1 == idxToInsert){
+            return;
+        }
+
+        memmove(
+            orderedQueue.getArray() + currentIdx,
+            orderedQueue.getArray() + currentIdx + 1,
+            (idxToInsert - currentIdx - 1) * sizeof(size_t)
+        );
+        orderedQueue.getArray()[idxToInsert - 1] = node;
+    }
+    
+    void calcPathLengths(
+        ABCAdjacencyMatrix<TCoef>& matrix,
+        size_t from,
+        TCoef threshold,
+        ArrayCollection<size_t>& orderedQueue,
+        ArrayCollection<TCoef>& pathsLengths,
+        Allocator* allocator
+    ) const {
+        orderedQueue.append(from);
+        pathsLengths[from] = 1;
 
         NeighboursIterator<TCoef> iterator;
-        while(ordered_queue.size()){
-            std::size_t current_node = ordered_queue.remove(ordered_queue.size() - 1);
-            TCoef current_path_length = paths_lengths[current_node];
+        while(orderedQueue.getSize()){
+            size_t currentNode = orderedQueue.remove(orderedQueue.getSize() - 1);
+            TCoef currentPathLength = pathsLengths[current_node];
 
-            matrix.getNeighboursIterator(current_node, 0, iterator);
-            // queue_changed = false;
+            matrix.replaceNeighboursIterator(current_node, 0, iterator, allocator);
+
             for(; !iterator.getStopped(); ++iterator){
-                std::size_t neighbour = iterator.to();
-                TCoef neighbour_path_length = iterator.coef() * current_path_length;
-                if(neighbour_path_length <= paths_lengths[neighbour]){
+                size_t neighbour = iterator.getTo();
+                TCoef neighbourPathLength = iterator.getCoef() * currentPathLength;
+                if(neighbourPathLength <= pathsLengths[neighbour]){
                     continue;
                 }
-                if(neighbour_path_length < threshold){
+                if(neighbourPathLength < threshold){
                     continue;
                 }
-                if(paths_lengths[neighbour] == 0){
-                    // add to queue using binary search
-                }
-                paths_lengths[neighbour] = neighbour_path_length;
-            }
+                TCoef old = pathsLengths.replace(neighbour, neighbourPathLength);
 
+                if(old == 0){
+                    this->insertToOrderedQueue(orderedQueue, pathsLengths, neighbour);
+                }else{
+                    this->updateQueue(orderedQueue, pathsLengths, neighbour);
+                }
+            }
         }
     }
 
+public:
+    Bitmap run(
+        ABCAdjacencyMatrix<TCoef>& matrix, 
+        IndexableCollection<size_t>& sources, 
+        TCoef threshold, 
+        Allocator* allocator
+    ){
+        ArrayCollection<size_t> orderedQueue(matrix.getSize(), allocator);
+        ArrayCollection<TCoef> pathsLengths(matrix.getSize(), 0, allocator);
 
+        Bitmap result(matrix.getSize(), false, allocator);
+
+        size_t* queueArray = (size_t*) allocator->allocate(matrix.getSize() * sizeof(size_t));
+        for(size_t i = 0; i < sources.getSize(); ++i){
+            size_t source = sources[i];
+
+            this->calcPathLengths(
+                matrix,
+                source,
+                threshold,
+                orderedQueue,
+                pathsLengths,
+                allocator
+            )
+            for(size_t i = 0; i < matrix.getSize(); ++i){
+                if(pathsLengths[i] >= threshold){
+                    result[i] = true;
+                }
+            }
+
+            if(i + 1 < sources.getSize()){
+                orderedQueue.clear();
+                memset((void*) pathsLengths.getArray(), 0, matrix.getSize() * sizeof(TCoef));
+            }
+        }
+
+        return result;
+    }
 };

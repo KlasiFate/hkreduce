@@ -80,6 +80,13 @@ public:
     };
     
     virtual T remove(size_t idx) = 0;
+
+    virtual void clear() {
+        for(size_t i = 0; i < this->size; ++i){
+            this->remove(this->size - 1);
+        }
+        this->truncate();
+    };
 };
 
 
@@ -128,6 +135,7 @@ public:
     size_t getSize() const {
         return this->size;
     };
+    
     virtual size_t getAllocatedSize() const = 0;
 
     Allocator* getAllocator() const {
@@ -139,24 +147,32 @@ public:
             throw invalid_argument("Invalid size argument. It is less than size of the collection");
         }
     };
+    
     void truncate() {
         this->resize(this->getSize());
     }
 
     virtual BoolReference operator[](size_t idx) = 0;
+    
     virtual const BoolReference operator[](size_t idx) const = 0;
 
     BoolReference at(size_t idx) {
         return (*this)[idx];
     };
+    
     const BoolReference at(size_t idx) const {
         return (*this)[idx];
     };
     
     virtual bool replace(size_t idx, bool element) = 0;
+    
     virtual void insert(size_t idx, bool element) = 0;
+    
     void append(bool element) {
         this->insert(this->getSize(), element);
     };
+    
     virtual bool remove(size_t idx) = 0;
+
+    virtual void clear() = 0;
 };

@@ -1,16 +1,20 @@
 #define PY_SSIZE_T_CLEAN
 
-#include <cstddef>
 #include <cstring>
 
 #include "Python.h"
 #include "structmember.h"
+
 #include "numpy/ndarrayobject.h"
 #include "numpy/ndarraytypes.h"
 
 #include "hkreduce/adjacency_matrix/csr.h"
 #include "hkreduce/collections/array_based.h"
 #include "hkreduce/collections/sectioned.h"
+#include "hkreduce/collections/algorithms.h"
+#include "hkreduce/reducing/drg.h"
+#include "hkreduce/reducing/drgep.h"
+#include "hkreduce/reducing/pfa.h"
 
 
 typedef struct {
@@ -59,12 +63,32 @@ static int CSRAdjacencyMatrixObject_init(CSRAdjacencyMatrixObject* self, PyObjec
         cols = (SectionedCollection<size_t>*) allocator->allocate(sizeof(SectionedCollection<size_t>));
         coefs = (SectionedCollection<double>*) allocator->allocate(sizeof(SectionedCollection<double>));
         self->matrix = (CSRAdjacencyMatrix<double>*) allocator->allocate(sizeof(CSRAdjacencyMatrix<double>));
+    }catch(const bad_alloc& error){
+        if(rows != nullptr){
+            allocator->deallocate((void*) rows);
+        }
+        if(cols != nullptr){
+            allocator->deallocate((void*) cols);
+        }
+        if(coefs != nullptr){
+            allocator->deallocate((void*) coefs);
+        }
+        if(self->matrix != nullptr){
+            allocator->deallocate((void*) self->matrix);
+        }
+        return -1;
+    }
 
+    try{
         new (rows) ArrayCollection<size_t>(size, 0, allocator);
         new (cols) SectionedCollection<size_t>(0, allocator);
         new (coefs) SectionedCollection<double>(0, allocator);
         new (self->matrix) CSRAdjacencyMatrix<double>(rows, cols, coefs, true, allocator);
-    }catch(bad_alloc& error){
+    }catch(const exception& error){
+        PyErr_SetString(PyExc_RuntimeError, error.what());
+        return -1;
+    }catch(...){
+        PyErr_SetString(PyExc_RuntimeError, "Unknown error");
         return -1;
     }
 
@@ -94,8 +118,8 @@ static PyObject* CSRAdjacencyMatrixObject_add_row(CSRAdjacencyMatrixObject* self
         PyErr_SetString(PyExc_ValueError, "The array's length doesn't equal matrix size");
         return NULL;
     }
-    if(PyArray_FLAGS(array) | NPY_ARRAY_CARRAY_RO == 0){
-        PyErr_SetString(PyExc_ValueError, "The array is not aligned or\\and not in C format of storing data");
+    if(PyArray_FLAGS(array) | NPY_C_CONTIGUOUS == 0){
+        PyErr_SetString(PyExc_ValueError, "The array is not in C format of storing data");
         return NULL;
     }
 
@@ -136,27 +160,109 @@ static PyObject* CSRAdjacencyMatrixObject_add_row(CSRAdjacencyMatrixObject* self
 }
 
 static PyObject* CSRAdjacencyMatrixObject_run(CSRAdjacencyMatrixObject* self, PyObject* args){
-    char* method;
-    if(!PyArg_ParseTuple(args, "s:run", &method)){
+    char method[6]; // len("DRGEP") + 1 == 6
+    double threshold;
+    PyArrayObject* sourcesNumpyArray;
+
+
+    if(!PyArg_ParseTuple(args, "sdO:run", &method, &threshold, &sourcesNumpyArray)){
+        return NULL;
+    }
+    if(!PyObject_IsInstance((PyObject*) sourcesNumpyArray, (PyObject*) &PyArray_Type)){
+        PyErr_SetString(PyExc_TypeError, "An array object of the \"numpy.ndarray\" type is expected");
+        return NULL;
+    }
+    if(PyArray_NDIM(sourcesNumpyArray) != 1){
+        PyErr_SetString(PyExc_ValueError, "Count of the array's dimensions doesn't equal 1");
+        return NULL;
+    }
+    if(PyArray_TYPE(sourcesNumpyArray) != NPY_UINTP){
+        PyErr_SetString(PyExc_TypeError, "The array's type doesn't equal double");
         return NULL;
     }
 
-    size_t accumulate = 0;
-    IndexableCollection<size_t>& rows = *self->matrix->getRows();
-    for(size_t i = 0; i < self->matrix->getSize(); ++i){
-        accumulate += rows[i];
-        rows[i] = accumulate;
+    size_t sourcesNumpyArraySize = (size_t) PyArray_DIM(sourcesNumpyArray, 0);
+
+    if(sourcesNumpyArraySize > self->matrix->getSize()){
+        PyErr_SetString(PyExc_ValueError, "The array's length is greater than matrix size");
+        return NULL;
+    }
+    if(PyArray_FLAGS(sourcesNumpyArray) | NPY_C_CONTIGUOUS == 0){
+        PyErr_SetString(PyExc_ValueError, "The array is not in C format of storing data");
+        return NULL;
     }
 
-    if(strcmp(method, "DRG")){
-        // run
-    }else if(strcmp(method, "DRGEP")){
-        // run
-    }else{
-        // run
-    }
+    PyArrayObject* resultArray;
+    try{
+        ArrayCollection<size_t> sources(sourcesNumpyArraySize, getDefaultAllocator());
+        for(size_t i = 0; i < sourcesNumpyArraySize; ++i){
+            size_t* idx = (size_t*) PyArray_GETPTR1(sourcesNumpyArray, (npy_intp) i);
+            sources.append(*idx);
+        }
 
-    return Py_None;
+        size_t accumulate = 0;
+        IndexableCollection<size_t>& rows = *self->matrix->getRows();
+        for(size_t i = 0; i < self->matrix->getSize(); ++i){
+            accumulate += rows[i];
+            rows[i] = accumulate;
+        }
+
+        Bitmap resultBitmap;
+        if(strcmp(method, "DRG")){
+            DRG<double> drg;
+            resultBitmap = drg.run(
+                *(self->matrix),
+                sources,
+                threshold,
+                getDefaultAllocator()
+            );
+        }else if(strcmp(method, "DRGEP")){
+            PFA<double> pfa;
+            resultBitmap = pfa.run(
+                *(self->matrix),
+                sources,
+                threshold,
+                getDefaultAllocator()
+            );
+        }else{
+            PFA<double> pfa;
+            resultBitmap = pfa.run(
+                *(self->matrix),
+                sources,
+                threshold,
+                getDefaultAllocator()
+            );
+        }
+
+        size_t resultArraySize = countBits(resultBitmap, true);
+        const npy_intp dims[1]{(npy_intp) resultArraySize};
+        resultArray = (PyArrayObject*) PyArray_NewFromDescr(
+            &PyArray_Type,
+            PyArray_DescrFromType(NPY_UINTP),
+            1,
+            dims,
+            NULL,
+            NULL,
+            NPY_ARRAY_C_CONTIGUOUS, // 0
+            NULL
+        );
+
+        for(size_t i = 0; i < self->matrix->getSize(); ++i){
+            if(resultBitmap[i]){
+                size_t* idx = (size_t*) PyArray_GETPTR1(resultArray, (npy_intp) i);
+                *idx = i;
+            }
+        }
+    }catch(const exception& error){
+        PyErr_SetString(PyExc_RuntimeError, error.what());
+        Py_XDECREF(resultArray);
+        return NULL;
+    }catch(...){
+        PyErr_SetString(PyExc_RuntimeError, "Unknown error");
+        Py_XDECREF(resultArray);
+        return NULL;
+    }
+    return (PyObject*) resultArray;
 };
 
 static PyMemberDef CSRAdjacencyMatrixObject_members[] = {

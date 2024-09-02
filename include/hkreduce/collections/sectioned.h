@@ -225,6 +225,15 @@ public:
 
         return result;
     };
+
+    void clear() override {
+        if(!is_trivial<T>::value){
+            for(size_t i = 0; i < this->sections.getSize(); ++i){
+                this->sections[i].clear();
+            }
+        }
+        this->truncate();
+    }
 };
 
 

@@ -54,7 +54,8 @@
         "cstring": "cpp",
         "compare": "cpp",
         "concepts": "cpp",
-        "numbers": "cpp"
+        "numbers": "cpp",
+        "complex": "cpp"
     },
     "C_Cpp.errorSquiggles": "enabled",
     "cSpell.language": "en,ru",

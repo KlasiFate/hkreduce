@@ -53,27 +53,6 @@ public:
         this->array = (T*) this->getAllocator()->allocate(sizeof(T) * this->allocated);
     }
 
-    template<enable_if_t<is_copy_constructible<T>::value, bool> = true>
-    ArrayCollection(
-        size_t size,
-        const T& value,
-        Allocator* allocator = getDefaultAllocator()
-    ) : ArrayCollection(size, allocator) {
-        try {
-            for (; this->initalizedElements < size; ++this->initalizedElements) {
-                new (this->array + this->initalizedElements) T(value);
-            }
-            this->setSize(size);
-        }
-        catch (...) {
-            for (size_t i = 0; i < this->initalizedElements; ++i) {
-                this->array[i].~T();
-            }
-            this->getAllocator()->deallocate(this->array);
-            throw;
-        }
-    }
-
     ArrayCollection() : ArrayCollection(nullptr, 0, 0, false, nullptr) { }
 
     ~ArrayCollection() {
@@ -267,6 +246,16 @@ public:
         }
         this->setSize(this->getSize() - 1);
         return old;
+    }
+
+    void clear() override {
+        if(!is_trivial<T>::value){
+            for(size_t i = 0; i < this->initalizedElements; ++i){
+                this->array[i].~T();
+            }
+        }
+        this->initalizedElements = 0;
+        this->setSize(0);
     }
 };
 
@@ -622,6 +611,11 @@ public:
         this->deleteArray = true;
 
         return old;
+    }
+
+    void clear() override {
+        ArrayCollection<T>::clear();
+        this->truncate();
     }
 };
 

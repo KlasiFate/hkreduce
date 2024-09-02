@@ -38,4 +38,12 @@ public:
         }
         return *this;
     }
+
+    bool operator==(bool value) const {
+        return (bool) *this == value;
+    }
+
+    bool operator==(const BoolReference& value) const {
+        return this->operator==((bool) value);
+    }
 };

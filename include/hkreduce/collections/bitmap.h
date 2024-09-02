@@ -12,10 +12,11 @@ using namespace std;
 
 class Bitmap: public IndexableCollection<bool> {
 public:
-    static const size_t BITS_COUNT_IN_SECTION = sizeof(size_t) * 8;
     typedef size_t BoolSection;
-    static const BoolSection ALL_EQUAL_ONE = SIZE_MAX;
-    static const BoolSection ALL_EQUAL_ZERO = 0;
+    static constexpr size_t BITS_COUNT_IN_SECTION = sizeof(BoolSection) * 8;
+    static constexpr size_t BOOL_SECTION_SIZE = sizeof(BoolSection);
+    static constexpr BoolSection ALL_EQUAL_ONE = SIZE_MAX;
+    static constexpr BoolSection ALL_EQUAL_ZERO = 0;
 
 private:
     IndexableCollection<BoolSection>* boolSections;
@@ -172,6 +173,7 @@ public:
     bool getDeleteBoolSections() const {
         return this->deleteBoolSections;
     }
+    
     void setDeleteBoolSections(bool deleteBoolSections) {
         this->deleteBoolSections = deleteBoolSections;
     }
@@ -308,5 +310,10 @@ public:
         }
 
         return old;
+    }
+
+    void clear() override {
+        this->setSize(0);
+        this->boolSections->clear();
     }
 };
