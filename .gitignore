@@ -40,3 +40,4 @@ __pycache__
 /cmake-trash
 /output
 /test*
+/build
