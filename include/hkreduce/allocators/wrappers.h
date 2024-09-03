@@ -34,7 +34,7 @@ public:
     }
 
     void* allocate(size_t size, const void* help) override {
-        size_t* helpRebound = --((size_t*) help);
+        size_t* helpRebound = ((size_t*) help) - 1;
         size_t sizeWithHint = sizeof(size_t) + size;
 
         size_t* ptr = (size_t*)((void*) allocator_traits<Allocator>::allocate(this->allocator, sizeWithHint, (void*) helpRebound));
@@ -44,7 +44,7 @@ public:
     }
 
     void deallocate(void* ptr) override {
-        size_t* ptrRebound = --((size_t*) ptr);
+        size_t* ptrRebound = ((size_t*) ptr) - 1;
         size_t size = *ptrRebound;
         size_t sizeWithHint = sizeof(size_t) + size;
 

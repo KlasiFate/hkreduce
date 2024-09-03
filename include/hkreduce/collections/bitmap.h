@@ -96,7 +96,7 @@ public:
 
     Bitmap& operator=(const Bitmap& other){
         if(&other == this){
-            return;
+            return *this;
         }
         
         if(boolSections != nullptr && this->deleteBoolSections){
@@ -111,7 +111,7 @@ public:
         if(other.boolSections == nullptr){
             this->boolSections = nullptr;
             this->deleteBoolSections = false;
-            return;
+            return *this;
         }
 
         this->boolSections = (SectionedCollection<BoolSection>*) this->getAllocator()->allocate(sizeof(SectionedCollection<BoolSection>));
@@ -134,7 +134,7 @@ public:
 
     Bitmap& operator=(Bitmap&& other) noexcept {
         if(&other == this){
-            return;
+            return *this;
         }
 
         if(boolSections != nullptr && this->deleteBoolSections){
@@ -146,6 +146,8 @@ public:
         this->deleteBoolSections = other.deleteBoolSections;
         this->setSize(other.getSize());
         this->setAllocator(other.getAllocator());
+
+        return *this;
     }
 
     ~Bitmap(){

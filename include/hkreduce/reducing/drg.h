@@ -49,7 +49,7 @@ private:
             }
 
             for(size_t idx = 0; idx < this->maxStackSize; ++idx){
-                BoolReference value = this->freeSpaceBitmap[idx]
+                BoolReference value = this->freeSpaceBitmap[idx];
                 if(value){
                     value = false;
                     return (void*) (this->space + (idx * innerIteratorSize));
@@ -58,7 +58,7 @@ private:
             return this->originalAllocator->allocate(innerIteratorSize);
         }
 
-        void deallocate(void* ptr) override {
+        void deallocate(void* ptr) noexcept override {
             ssize_t idx = (ssize_t) ((char*) ptr - this->space);  
             if(idx < 0 || idx >= this->maxStackSize * this->innerIteratorSize){
                 this->originalAllocator->deallocate(ptr);
@@ -76,12 +76,12 @@ private:
 
     void checkAchievables(ABCAdjacencyMatrix<TCoef>& matrix, size_t source, Bitmap& achievables, Allocator* allocator) const {
         using Pair = pair<size_t, NeighboursIterator<TCoef>>;
-        Pair* stackArray = allocator->allocate(sizeof(Pair) * matrix.getSize());
+        Pair* stackArray = (Pair*) allocator->allocate(sizeof(Pair) * matrix.getSize());
         ArrayCollection<Pair> stack(stackArray, matrix.getSize(), 0, true, allocator);
 
         AllocatorForInnerIterators allocatorForInnerIterators(allocator, matrix.getSize());
         
-        stack.append(Pair(source, matrix.getNeighboursIterator(source, 0, allocatorForInnerIterators)));
+        stack.append(Pair(source, matrix.getNeighboursIterator(source, 0, &allocatorForInnerIterators)));
         achievables[source] = true;
 
         while (stack.getSize() > 0) {
@@ -89,17 +89,17 @@ private:
 
             bool added = false;
             for (NeighboursIterator<TCoef>& iterator = pair.second; !iterator.getStopped(); ++iterator) {
-                size_t neighbour = iterator.to();
+                size_t neighbour = iterator.getTo();
                 if (achievables[neighbour]) {
                     continue;
                 }
                 achievables[neighbour] = true;
-                stack.append(Pair(neighbour, matrix.getNeighboursIterator(neighbour, 0, allocatorForInnerIterators)));
+                stack.append(Pair(neighbour, matrix.getNeighboursIterator(neighbour, 0, &allocatorForInnerIterators)));
                 added = true;
                 break;
             }
             if (!added) {
-                stack.remove(stack.size() - 1);
+                stack.remove(stack.getSize() - 1);
             }
         }
     }
@@ -111,19 +111,19 @@ public:
         TCoef threshold, 
         Allocator* allocator
     ) const {
-        this->removeEdges(matrix, threshold);
+        this->removeEdges(matrix, threshold, allocator);
 
         Bitmap achievables(matrix.getSize(), false);
 
         for (size_t i = 0; i < sources.getSize(); ++i) {
-            source = sources[i];
-            if (source > matrix->size()) {
+            size_t source = sources[i];
+            if (source > matrix.getSize()) {
                 throw invalid_argument("Index of source is out of range");
             }
             if (achievables[source]) {
                 continue;
             }
-            this->checkAchievables(matrix, source, achievables);
+            this->checkAchievables(matrix, source, achievables, allocator);
         }
         return achievables;
     };

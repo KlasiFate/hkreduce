@@ -18,7 +18,20 @@ private:
         ArrayCollection<TCoef>& pathsLengths,
         size_t node
     ) const {
-        
+        function<bool(const size_t&, const size_t&)> compare = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+            TCoef middleElementPath = pathsLengths[middleElement];
+            TCoef elementPath = pathsLengths[element];
+            if(middleElementPath < elementPath){
+                return true;
+            }
+            if(middleElementPath > elementPath){
+                return false;
+            }
+            if(middleElement <= element){
+                return true;
+            }
+            return false;
+        };
 
         size_t idxToInsert = bsearchLeftToInsert<size_t>(
             &orderedQueue,
@@ -113,9 +126,9 @@ private:
         NeighboursIterator<TCoef> iterator;
         while(orderedQueue.getSize()){
             size_t currentNode = orderedQueue.remove(orderedQueue.getSize() - 1);
-            TCoef currentPathLength = pathsLengths[current_node];
+            TCoef currentPathLength = pathsLengths[currentNode];
 
-            matrix.replaceNeighboursIterator(current_node, 0, iterator, allocator);
+            matrix.replaceNeighboursIterator(currentNode, 0, iterator, allocator);
 
             for(; !iterator.getStopped(); ++iterator){
                 size_t neighbour = iterator.getTo();
@@ -160,7 +173,7 @@ public:
                 orderedQueue,
                 pathsLengths,
                 allocator
-            )
+            );
             for(size_t i = 0; i < matrix.getSize(); ++i){
                 if(pathsLengths[i] >= threshold){
                     result[i] = true;

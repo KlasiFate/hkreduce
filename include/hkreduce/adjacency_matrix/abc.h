@@ -101,7 +101,7 @@ private:
 
 public:
     NeighboursIterator(const NeighboursIterator<TCoef>& other) :
-        iterator(other.iterator == nullptr ? nullptr : other.iterator->copy()),
+        iterator(other.iterator == nullptr ? nullptr : other.iterator->copy(other.allocator)),
         allocator(other.allocator) { }
     NeighboursIterator(NeighboursIterator<TCoef>&& other) :
         iterator(other.iterator),

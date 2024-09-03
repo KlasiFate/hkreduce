@@ -272,8 +272,7 @@ public:
     ) : SectionedCollection(size, allocator, sectionSize) {
         for (size_t i = 0; i < size; ++i) {
             size_t sectionIdx = i / sectionSize;
-            size_t idxInSection = i % sectionSize;
-            this->sections[sectionIdx].constructAt(idxInSection, value);
+            this->sections[sectionIdx].append(value);
         }
         this->setSize(size);
     };

@@ -140,7 +140,7 @@ public:
             return 0;
         }
 
-        size_t idx = bsearchLeftToInsert<size_t>(this->cols, to, start, stop);
+        size_t idx = bsearchLeftToInsert<size_t>(*(this->cols), to, start, stop);
         if (idx == start) {
             return 0;
         }
@@ -164,7 +164,7 @@ public:
         size_t start = from != 0 ? rows[from - 1] : 0;
         size_t stop = rows[from];
 
-        size_t idx = bsearchLeftToInsert<size_t>(this->cols, to, start, stop);
+        size_t idx = bsearchLeftToInsert<size_t>(*(this->cols), to, start, stop);
         if (idx != start && cols[idx - 1] == to) {
             return coefs.replace(idx - 1, coef);
         }

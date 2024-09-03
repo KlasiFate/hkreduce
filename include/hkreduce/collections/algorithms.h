@@ -4,6 +4,7 @@
 
 #include "../collections/array_based.h"
 #include "../collections/sectioned.h"
+#include "../collections/bitmap.h"
 
 
 using namespace std;
@@ -36,7 +37,8 @@ size_t bsearchLeftToInsert(
         // compare is function that equals "middleElement <= element" expression
         if (compare(middleElement, element)) {
             start = middle + 1;
-        }else {
+        }
+        else {
             stop = middle;
         }
     }
@@ -141,7 +143,7 @@ size_t bsearchLeft(
     function<int(const T&, const T&)> compare = [] (const T& first, const T& second) -> int {
         return first == second ? 0 : (first < second ? -1 : 1);
         };
-    return bsearch<T, TCollection>(
+    return bsearchLeft<T, TCollection>(
         collection,
         element,
         compare,
