@@ -1,10 +1,19 @@
-from typing import Any
-
 import numpy as np
 from cantera import Solution  # type: ignore[import-untyped]
+from numpy.typing import NDArray
+
+from .cpp_interface import CSRAdjacencyMatrix
 
 
-def drg_run(st: Solution, state: Any) -> None:
+def create_matrix_for_drg(
+    st: Solution,
+    temperature: float,
+    pressure: float,
+    mass_fractions: NDArray[np.float64],
+) -> CSRAdjacencyMatrix:
+    # Устанавливаем состояние системы чтобы в дальнейшем взять необходимые данные, посчитанные cantera'ой
+    st.TPY = (temperature, pressure, mass_fractions)
+
     # Данные взятые из canter'ы:
     #
     # st.net_rates_of_progress - Вектор коэффициентов скорости реакций для заданного состояния.
@@ -63,6 +72,11 @@ def drg_run(st: Solution, state: Any) -> None:
     # вектор знаменателей (из формулы для DRG) для каждого вещества.
     divider = np.sum(base_rates, axis=1)
 
+    try:
+        matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
+
     for specy_a in range(st.n_species):
         if divider[specy_a] == 0:
             continue
@@ -83,11 +97,29 @@ def drg_run(st: Solution, state: Any) -> None:
         # Зануляем rAA
         coefs_for_specy_a[specy_a] = 0
 
-        # add to csr matrix in c layer
+        try:
+            matrix.add_row(coefs_for_specy_a, specy_a)
+        except Exception as error:
+            raise RuntimeError("Exception from c++ layer") from error
+
+    try:
+        matrix.finalize()
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
+
+    return matrix
 
 
-def drgep_run(st: Solution, state: Any) -> None:
-    # См. комментарии drg_run
+def create_matrix_for_drgep(
+    st: Solution,
+    temperature: float,
+    pressure: float,
+    mass_fractions: NDArray[np.float64],
+) -> CSRAdjacencyMatrix:
+    # См. комментарии drg_run, тк большая часть кода аналогична
+
+    st.TPY = (temperature, pressure, mass_fractions)
+
     valid_reactions = np.where(st.net_rates_of_progress != 0)
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
     reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
@@ -111,6 +143,11 @@ def drgep_run(st: Solution, state: Any) -> None:
     delta = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
     del product_stoich_coeffs, reactant_stoich_coeffs
 
+    try:
+        matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
+
     for specy_a in range(st.n_species):
         divider = max(pa[specy_a], ca[specy_a])
         if divider == 0:
@@ -121,10 +158,29 @@ def drgep_run(st: Solution, state: Any) -> None:
 
         coefs_for_specy_a[specy_a] = 0
 
-        # add to csr matrix in c layer
+        try:
+            matrix.add_row(coefs_for_specy_a, specy_a)
+        except Exception as error:
+            raise RuntimeError("Exception from c++ layer") from error
+
+    try:
+        matrix.finalize()
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
+
+    return matrix
 
 
-def pfa_run(st: Solution, state: Any) -> None:
+def create_matrix_for_pfa(
+    st: Solution,
+    temperature: float,
+    pressure: float,
+    mass_fractions: NDArray[np.float64],
+) -> CSRAdjacencyMatrix:
+    # См. комментарии drg_run, тк большая часть кода аналогична
+
+    st.TPY = (temperature, pressure, mass_fractions)
+
     valid_reactions = np.where(st.net_rates_of_progress != 0)
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
     reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
@@ -166,7 +222,13 @@ def pfa_run(st: Solution, state: Any) -> None:
     rab_pro_2 = np.dot(rab_pro_1, rab_pro_1)
     rab_con_2 = np.dot(rab_con_1, rab_con_1)
 
+    matrix = CSRAdjacencyMatrix(st.n_species)
+
     for specy_a in range(st.n_species):
         rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
 
-        # add to csr matrix in c layer
+        matrix.add_row(rab, specy_a)
+
+    matrix.finalize()
+
+    return matrix

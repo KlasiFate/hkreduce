@@ -1,0 +1,13 @@
+from typing import Literal
+
+import numpy as np
+from numpy.typing import NDArray
+
+class CSRAdjacencyMatrix:
+    def __init__(self, size: int) -> None: ...
+    def add_row(self, row: NDArray[np.float64], row_idx: int) -> None: ...
+    def finalize(self) -> None: ...
+
+def run(
+    matrix: CSRAdjacencyMatrix, method: Literal["DRG", "DRGEP", "PFA"], threshold: float, sources: NDArray[np.uintp]
+) -> NDArray[np.uintp]: ...

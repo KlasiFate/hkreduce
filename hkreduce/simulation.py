@@ -1,144 +1,297 @@
-import os
+import multiprocessing
 from contextlib import contextmanager
-from tempfile import mkstemp
-from typing import Any, BinaryIO, Generator
+from enum import Enum, auto
+from multiprocessing.connection import Connection
+from multiprocessing.context import Process
+from multiprocessing.synchronize import BoundedSemaphore
+from typing import Any, Generator, cast
 
-import cantera as ct
 import numpy as np
+from cantera import (  # type: ignore[import-untyped]
+    IdealGasConstPressureReactor,
+    IdealGasReactor,
+    ReactorNet,
+    Solution,
+    one_atm,
+)
+from loguru import logger
 from numpy.typing import NDArray
 
-from .config import AutoignitionCondition
+from .config import AutoignitionConditionConfig, ReducingTaskConfig
+from .errors import NoAutoignitionError, SampleCreatingError, TooSmallStepsSampleError
+from .logging import setup_config
 from .typing import PathLike
+from .utils import NumpyArrayDumper, WorkersCloser, create_unique_file
 
 
-class NumpyArrayDumper:
-    def __init__(self, file: BinaryIO) -> None:
-        self.file: BinaryIO = file
-
-    def write_data(self, time: float, temperature: float, pressure: float, mass_fractions: NDArray[np.float64]) -> None:
-        if self.file is None or self.file.closed:
-            raise ValueError("File is not opened or already closed")
-        if "w" not in self.file.mode:
-            raise ValueError("File is not opened to write")
-        np.save(
-            self.file,
-            np.array((time, temperature, pressure, mass_fractions), dtype=np.float64),
-            allow_pickle=False,
-        )
-        np.save(self.file, mass_fractions, allow_pickle=False)
-
-    def read_data(self) -> tuple[float, float, float, NDArray[np.float64]]:
-        if self.file is None or self.file.closed:
-            raise ValueError("File is not opened or already closed")
-        if "r" not in self.file.mode:
-            raise ValueError("File is not opened to read")
-        time, temperature, pressure = np.load(
-            self.file,
-            allow_pickle=False,
-        )
-        mass_fractions = np.load(
-            self.file,
-            allow_pickle=False,
-        )
-        return time, temperature, pressure, mass_fractions
+class Answer(int, Enum):
+    INITIALIZED = auto()
+    SAMPLE_ERROR = auto()
+    ERROR = auto()
+    END = auto()
 
 
 class StateLogger:
-    def __init__(self, tmp_dir: PathLike) -> None:
+    def __init__(self, tmp_dir: PathLike, ai_condition_idx: int) -> None:
         self.max_temperature: float | None = None
         self.logged_steps_count = 0
         self.ignition_delay: float | None = None
+        self.ignition_temperature: float | None = None
 
-        self.tmp_dir = tmp_dir
-        self.dumper: NumpyArrayDumper | None = None
-        self.filename: PathLike | None = None
+        self.ai_condition_idx = ai_condition_idx
+
+        filename = create_unique_file(
+            suffix=".npy", prefix=f"steps_cache_of_{self.ai_condition_idx}_ai_case_", dir=tmp_dir
+        ).name
+        self._dumper = NumpyArrayDumper(dir=tmp_dir, filename=filename)
 
     def update(self, time: float, temperature: float, pressure: float, mass_fractions: NDArray[np.float64]) -> None:
-        if self.dumper is None:
-            raise ValueError("State logger is not opened to write")
         if self.max_temperature is None or self.max_temperature < temperature:
             self.max_temperature = temperature
         self.logged_steps_count += 1
-        self.dumper.write_data(time, temperature, pressure, mass_fractions)
+        self._dumper.write_data(np.array([time, temperature, pressure], dtype=np.float64))
+        self._dumper.write_data(mass_fractions)
 
     def read_step_data(self) -> tuple[float, float, float, NDArray[np.float64]]:
-        if self.dumper is None:
-            raise ValueError("State logger is not opened to read")
-        return self.dumper.read_data()
+        time, temperature, pressure = self._dumper.read_data()
+        mass_fractions = self._dumper.read_data()
+        return time, temperature, pressure, mass_fractions
 
-    def set_ignition_delay(self, ignition_delay: float) -> None:
+    def set_ignition_delay_and_temperature(self, ignition_delay: float, temperature: float) -> None:
         self.ignition_delay = ignition_delay
+        self.ignition_temperature = temperature
 
     @contextmanager
     def open_to_write(self) -> Generator["StateLogger", Any, Any]:
-        file_descriptor, self.filename = mkstemp(prefix="hkreduce_", dir=self.tmp_dir)
         try:
-            with open(file_descriptor, mode="wb") as file:
-                self.dumper = NumpyArrayDumper(file)
-                yield self
+            self._dumper.open("w")
+            yield self
         finally:
-            # I don't know I should close fd or not
-            os.close(file_descriptor)
-            self.dumper = None
+            self._dumper.close()
 
     @contextmanager
     def open_to_read(self) -> Generator["StateLogger", Any, Any]:
         try:
-            with open(self.filename, mode="rb") as file:
-                self.dumper = NumpyArrayDumper(file)
-                yield self
+            self._dumper.open("r")
+            yield self
         finally:
-            self.dumper = None
+            self._dumper.close()
 
 
 class Simulation:
-    def __init__(self, model: ct.Solution, condition: AutoignitionCondition, tmp_dir: PathLike) -> None:
-        self.model = model
-        self.condition = condition
+    def __init__(
+        self,
+        model_path: PathLike,
+        ai_condition: AutoignitionConditionConfig,
+        ai_condition_idx: int,
+        tmp_dir: PathLike,
+        sem: BoundedSemaphore,
+        conn: Connection,
+        *,
+        debug: bool,
+        only_ignition_delay: bool,
+    ) -> None:
+        self.model_path = model_path
+        self.ai_condition = ai_condition
+        self.ai_condition_idx = ai_condition_idx
         self.tmp_dir = tmp_dir
+        self.sem = sem
+        self.conn = conn
+        self.debug = debug
+        self.only_ignition_delay = only_ignition_delay
 
-    def run(self) -> StateLogger:
-        self.model.TPX = (self.condition.temperature, self.condition.pressure * ct.one_atm, self.condition.reactants)
-        if self.condition.kind == "CONSTANT_PRESSURE":
-            reactor = ct.IdealGasConstPressureReactor(self.model)
+    def _run_simulation(self) -> StateLogger:
+        model = Solution(self.model_path)
+        model.TPX = (
+            self.ai_condition.temperature,
+            self.ai_condition.pressure * one_atm,
+            self.ai_condition.reactants,
+        )
+        if self.ai_condition.kind == "CONSTANT_PRESSURE":
+            reactor = IdealGasConstPressureReactor(self.model_path)
         else:
-            reactor = ct.IdealGasReactor(self.model)
-        simulation = ct.ReactorNet([reactor])
+            reactor = IdealGasReactor(self.model_path)
+        simulation = ReactorNet([reactor])
 
-        if self.condition.max_time_step:
-            simulation.max_time_step = self.condition.max_time_step
-        end_of_time = self.condition.end_of_time
+        if self.ai_condition.max_time_step:
+            simulation.max_time_step = self.ai_condition.max_time_step
+        end_of_time = self.ai_condition.end_of_time
 
-        state_logger = StateLogger(self.tmp_dir)
-        ignition_delay: float | None = None
+        residual_threshold = self.ai_condition.residual_threshold_coef * simulation.rtol
 
-        max_state_values = simulation.get_state()
-        residual_threshold = self.condition.residual_threshold_coef * simulation.rtol
-        absolute_tolerance = simulation.atol
+        state_logger: StateLogger = StateLogger(self.tmp_dir, self.ai_condition_idx)
 
-        with state_logger.open_to_write():
+        def sim() -> None:
+            ignition_delay: float | None = None
+            ignition_temperature: float | None = None
+
+            max_state_values = simulation.get_state()
+
+            if not self.only_ignition_delay:
+                state_logger.update(simulation.time, reactor.T, reactor.thermo.P, reactor.Y)
+
             step_idx = 0
-            while step_idx < self.condition.max_steps and (end_of_time is None or simulation.time < end_of_time):
+            while step_idx < self.ai_condition.max_steps and (end_of_time is None or simulation.time < end_of_time):
                 prev_state = simulation.get_state()
 
                 simulation.step()
 
-                state_logger.update(simulation.time, reactor.T, reactor.thermo.P, reactor.Y)
+                if not self.only_ignition_delay:
+                    state_logger.update(simulation.time, reactor.T, reactor.thermo.P, reactor.Y)
 
-                if ignition_delay is None and self.condition.temperature + 400.0 <= reactor.T:
+                if self.ai_condition.temperature + 400.0 <= reactor.T and ignition_delay is None:
                     ignition_delay = simulation.time
+                    ignition_temperature = reactor.T
+                    break
 
                 current_state = simulation.get_state()
                 max_state_values = np.maximum(max_state_values, current_state)
 
                 residual = np.linalg.norm(
-                    (current_state - prev_state) / (max_state_values + absolute_tolerance)
-                ) / np.sqrt(self.sim.n_vars)
+                    (current_state - prev_state) / (max_state_values + simulation.atol)
+                ) / np.sqrt(simulation.n_vars)
 
                 if residual < residual_threshold:
                     break
 
-            if ignition_delay:
-                state_logger.set_ignition_delay(ignition_delay)
+            if ignition_delay is not None and ignition_temperature is not None:
+                state_logger.set_ignition_delay_and_temperature(ignition_delay, ignition_temperature)
 
+        if self.only_ignition_delay:
+            sim()
+            return state_logger
+
+        with state_logger.open_to_write():
+            sim()
         return state_logger
+
+    def _create_sample(self, state_logger: StateLogger) -> NumpyArrayDumper:
+        if state_logger.ignition_delay is None or state_logger.ignition_temperature is None:
+            msg = f"No auto ignition happened for {self.ai_condition_idx} case"
+            logger.info(msg)
+            raise NoAutoignitionError(msg)
+
+        temperature_diff = state_logger.ignition_temperature - self.ai_condition.temperature
+
+        temperature_delta = temperature_diff / self.ai_condition.steps_sample_size
+
+        filename = create_unique_file(
+            self.tmp_dir, prefix=f"steps_sample_of_{self.ai_condition_idx}_ai_case_", suffix=".npy"
+        ).name
+
+        i = 0
+        with (
+            state_logger.open_to_read(),
+            NumpyArrayDumper(
+                dir=self.tmp_dir,
+                filename=filename,
+            ).open("w") as sample_saver,
+        ):
+            for __ in range(state_logger.logged_steps_count):
+                __, temperature, pressure, mass_fractions = state_logger.read_step_data()  # type: ignore[assignment]
+                if temperature >= self.ai_condition.temperature + i * temperature_delta:
+                    data = np.array((temperature, pressure), dtype=np.float64) + mass_fractions
+                    sample_saver.write_data(data)
+                    i += 1
+
+        if i < self.ai_condition.steps_sample_size:
+            msg = f"Too small steps sample is got for {self.ai_condition_idx} case. \
+Change steps sample size or case conditions"
+            logger.info(msg)
+            raise TooSmallStepsSampleError(msg)
+
+        return sample_saver
+
+    def run(self) -> None:
+        setup_config(debug=self.debug)
+        self.conn.send((Answer.INITIALIZED, ()))
+
+        try:
+            with self.sem:
+                logger.debug(f"Run simulation for {self.ai_condition_idx} case")
+                state_logger = self._run_simulation()
+                logger.debug(f"Simulation for {self.ai_condition_idx} case is finished")
+                if self.only_ignition_delay:
+                    self.conn.send((Answer.END, (state_logger.ignition_delay,)))
+                    return
+
+                logger.debug(f"Creating sample for {self.ai_condition_idx} case")
+                try:
+                    sample = self._create_sample(state_logger)
+                except SampleCreatingError:
+                    self.conn.send((Answer.SAMPLE_ERROR, ()))
+                    return
+                self.conn.send((Answer.END, (sample, state_logger.ignition_delay)))
+        except Exception:
+            self.conn.send((Answer.ERROR, ()))
+            logger.opt(exception=True).critical("Error while simulation")
+            return
+
+
+class SimulationManager:
+    def __init__(
+        self,
+        model_path: PathLike,
+        reducing_task_config: ReducingTaskConfig,
+        num_threads: int,
+        tmp_dir: PathLike,
+        *,
+        debug: bool,
+        only_ignition_delays: bool,
+    ) -> None:
+        self.model_path = model_path
+        self.reducing_task_config = reducing_task_config
+        self.tmp_dir = tmp_dir
+        self.debug = debug
+        self.only_ignition_delays = only_ignition_delays
+
+        self._sem = multiprocessing.BoundedSemaphore(num_threads)
+
+    def _create_simulations(self) -> list[tuple[Process, Connection]]:
+        simulations: list[tuple[Process, Connection]] = []
+        for ai_cond_idx, ai_cond in enumerate(self.reducing_task_config.autoignition_conditions):
+            for_manager, for_simulation = multiprocessing.Pipe(duplex=True)
+
+            simulation = Simulation(
+                model_path=self.reducing_task_config.model,
+                ai_condition=ai_cond,
+                ai_condition_idx=ai_cond_idx,
+                tmp_dir=self.tmp_dir,
+                sem=self._sem,
+                conn=for_simulation,
+                debug=self.debug,
+                only_ignition_delay=self.only_ignition_delays,
+            )
+
+            process_name = f"simulation_for_{ai_cond_idx}_ai_condition"
+            process = multiprocessing.Process(target=simulation.run, name=process_name, daemon=True)
+            simulations.append((process, for_manager))
+
+        return simulations
+
+    def run(self) -> tuple[list[NumpyArrayDumper], list[float]]:
+        logger.debug("Creating simulations")
+        simulations = self._create_simulations()
+        logger.debug("Starting simulations")
+        with WorkersCloser(simulations):
+            samples_savers: list[NumpyArrayDumper] = []
+            ignition_delays: list[float] = []
+            for __, conn in simulations:
+                message, details = cast(tuple[Answer, tuple[Any, ...]], conn.recv())
+                if message == Answer.SAMPLE_ERROR:
+                    raise SampleCreatingError("No auto ignition detected or too small sample size")
+
+                if message != Answer.END:
+                    raise RuntimeError("Error in simulation worker process")
+
+                if self.only_ignition_delays:
+                    ignition_delay = details[0]
+                    ignition_delays.append(ignition_delay)
+                else:
+                    sample_saver, ignition_delay = details
+                    samples_savers.append(sample_saver)
+                    ignition_delays.append(ignition_delay)
+
+        logger.debug("Simulations are finished")
+
+        return samples_savers, ignition_delays
