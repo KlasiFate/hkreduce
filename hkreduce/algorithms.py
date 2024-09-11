@@ -179,7 +179,7 @@ def create_matrix_for_pfa(
 ) -> CSRAdjacencyMatrix:
     # См. комментарии drg_run, тк большая часть кода аналогична
 
-    st.TPY = (temperature, pressure, mass_fractions)
+    st.TPX = (temperature, pressure, mass_fractions)
 
     valid_reactions = np.where(st.net_rates_of_progress != 0)
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]

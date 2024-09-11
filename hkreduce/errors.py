@@ -13,19 +13,17 @@ class BaseError(Exception):
         return f"{self.__class__.__module__}.{self.__class__.__name__}: {self.msg}"
 
 
-class LoadModelFailedError(BaseError):
-    pass
-
-
-
 class SimulationError(BaseError):
     pass
+
 
 class SampleCreatingError(SimulationError):
     pass
 
+
 class NoAutoignitionError(SimulationError):
     pass
+
 
 class TooSmallStepsSampleError(SimulationError):
     pass
@@ -33,6 +31,7 @@ class TooSmallStepsSampleError(SimulationError):
 
 class ReducingError(BaseError):
     pass
+
 
 class AutoretrievingInitialThresholdError(ReducingError):
     pass

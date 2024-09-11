@@ -14,12 +14,11 @@ from cantera import (  # type: ignore[import-untyped]
     Solution,
     one_atm,
 )
-from loguru import logger
 from numpy.typing import NDArray
 
 from .config import AutoignitionConditionConfig, ReducingTaskConfig
 from .errors import NoAutoignitionError, SampleCreatingError, TooSmallStepsSampleError
-from .logging import setup_config
+from .logging import get_logger, setup_config
 from .typing import PathLike
 from .utils import NumpyArrayDumper, WorkersCloser, create_unique_file
 
@@ -166,6 +165,7 @@ class Simulation:
         return state_logger
 
     def _create_sample(self, state_logger: StateLogger) -> NumpyArrayDumper:
+        logger = get_logger()
         if state_logger.ignition_delay is None or state_logger.ignition_temperature is None:
             msg = f"No auto ignition happened for {self.ai_condition_idx} case"
             logger.info(msg)
@@ -204,6 +204,8 @@ Change steps sample size or case conditions"
 
     def run(self) -> None:
         setup_config(debug=self.debug)
+        logger = get_logger()
+
         self.conn.send((Answer.INITIALIZED, ()))
 
         try:
@@ -270,6 +272,7 @@ class SimulationManager:
         return simulations
 
     def run(self) -> tuple[list[NumpyArrayDumper], list[float]]:
+        logger = get_logger()
         logger.debug("Creating simulations")
         simulations = self._create_simulations()
         logger.debug("Starting simulations")

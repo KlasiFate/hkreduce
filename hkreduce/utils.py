@@ -57,7 +57,7 @@ class NumpyArrayDumper:
         else:
             self.filepath = self.dirpath / self.filename
 
-        self._file = open(self.filepath, mode=mode_casted)
+        self._file = open(self.filepath, mode=mode_casted) # noqa: SIM115
 
         return self
 
@@ -106,7 +106,7 @@ class WorkersCloser:
     def __init__(self, workers: list[tuple[Process, Connection]]) -> None:
         self.workers = workers
 
-    def __enter__(self) -> "WorkersCloser":
+    def open(self) -> None:
         started_processes: list[Process] = []
         try:
             for proccess, conn in self.workers:
@@ -124,9 +124,7 @@ class WorkersCloser:
                     proccess.join()
             raise
 
-        return self
-
-    def __exit__(self, *args: Any) -> None:
+    def close(self) -> None:
         for worker_process, __ in self.workers:
             if worker_process.is_alive():
                 worker_process.terminate()
@@ -134,3 +132,10 @@ class WorkersCloser:
         for worker_process, __ in self.workers:
             if worker_process.is_alive():
                 worker_process.join()
+
+    def __enter__(self) -> "WorkersCloser":
+        self.open()
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()

@@ -2,17 +2,20 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
-import cantera as ct
+import cantera as ct  # type: ignore[import-untyped]
 import click
 import yaml
 import yaml.error
+from cantera import Solution
 from pydantic import ValidationError
 
 from .config import Config, ReducingTaskConfig
-from .reducer import ReducersManager
+from .errors import BaseError
+from .logging import get_logger, setup_config
+from .main import Main
 
 
-def create_config(input: str, output: str | None, num_threads: int | None, debug: bool) -> Config:  # noqa: A002
+def create_config(input: str, output: str | None, num_threads: int | None, debug: bool) -> Config:  # noqa: A002, FBT001
     kwargs: dict[str, Any] = {"input": input, "debug": debug}
     if output is not None:
         kwargs["output"] = output
@@ -26,7 +29,7 @@ def create_config(input: str, output: str | None, num_threads: int | None, debug
         raise ValueError(suberror["msg"]) from error
 
 
-def read_yaml_file(config: Config) -> ReducingTaskConfig:
+def read_reducing_task_config(config: Config) -> ReducingTaskConfig:
     default_msg = f"Wrong format of yaml file `{config.input}`."
     try:
         with open(config.input, "rt") as file:
@@ -58,8 +61,14 @@ def read_yaml_file(config: Config) -> ReducingTaskConfig:
     return task
 
 
-def run(config: Config, reducing_task_config: ReducingTaskConfig) -> None:
-    pass
+def run(model: Solution, config: Config, reducing_task_config: ReducingTaskConfig) -> None:
+    Main(
+        model=model,
+        reducing_task_config=reducing_task_config,
+        num_threads=config.num_threads,
+        output_model_path=config.output,
+        debug=config.debug,
+    ).run()
 
 
 @click.command()
@@ -89,13 +98,39 @@ Default: n - 1 if system is mutlicores else 1",
     default=False,
     help="Enable debug mode that make logs more verbose",
 )
-def main(input: str, output: str | None, num_threads: int | None, debug: bool) -> None:  # noqa: A002
+def main(input: str, output: str | None, num_threads: int | None, debug: bool) -> None:  # noqa: A002,FBT001
+    setup_config(debug=debug)
+    logger = get_logger()
     try:
         config = create_config(input, output, num_threads, debug=debug)
-        reducing_task = read_yaml_file(config)
-    except ValueError:
-        # TODO: log
+        reducing_task_config = read_reducing_task_config(config)
+    except ValueError as error:
+        logger.error(
+            f"Error while reading creating config or reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
+        )
         return
-    except Exception:
-        # TODO: log
+    except Exception:  # noqa: BLE001
+        logger.opt(exception=True).critical("Uncaught error")
+        return
+
+    try:
+        model = Solution(reducing_task_config.model)
+    except ct.CanteraError as error:
+        logger.error(f"Problems while loading model.\n{error.args[0]}")  # noqa: G004
+        return
+
+    try:
+        species = {specy.name for specy in model.species()}
+        reducing_task_config.check_all_species_exist(species)
+    except ValueError as error:
+        logger.error(error.args[0])
+        return
+
+    try:
+        run(model, config, reducing_task_config)
+    except BaseError as error:
+        logger.error(error.msg)
+        return
+    except Exception:  # noqa: BLE001
+        logger.opt(exception=True).critical("Uncaught error")
         return

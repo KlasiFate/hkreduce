@@ -1,9 +1,14 @@
+from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, TypeAlias
+from typing import Any, TypeAlias
 
 PathLike: TypeAlias = Path | str
 
-ReducingMethod: TypeAlias = Literal["DRG", "DRGEP", "PFA"]
+
+class ReducingMethod(str, Enum):
+    DRG = "DRG"
+    DRGEP = "DRGEP"
+    PFA = "PFA"
 
 
 LoggingConfig: TypeAlias = dict[str, Any]
