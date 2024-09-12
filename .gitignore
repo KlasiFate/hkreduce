@@ -40,3 +40,5 @@ __pycache__
 /output
 /test*
 /dist
+/build
+/hkreduce.egg-info

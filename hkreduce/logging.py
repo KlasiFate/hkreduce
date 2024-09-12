@@ -1,6 +1,11 @@
 import sys
+from typing import TYPE_CHECKING
 
-from loguru import Logger, logger
+if not TYPE_CHECKING:
+    from loguru import _Logger as Logger
+else:
+    from loguru import Logger
+from loguru import logger
 
 from .typing import LoggingConfig
 

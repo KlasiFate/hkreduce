@@ -15,7 +15,46 @@
 #include "hkreduce/reducing/drg.h"
 #include "hkreduce/reducing/drgep.h"
 #include "hkreduce/reducing/pfa.h"
+#include "hkreduce/allocators/abc.h"
+#include "hkreduce/allocators/default.h"
 
+using namespace std;
+
+class PyBadAlloc : public bad_alloc {
+private:
+    const char* msg;
+public:
+    PyBadAlloc(const char* msg) : msg(msg) { }
+
+    const char* what() const noexcept override {
+        return this->msg;
+    }
+};
+
+class WrapperOfPyAllocator : public Allocator {
+public:
+    WrapperOfPyAllocator() { }
+
+    void* allocate(size_t size) override {
+        void* ptr = PyMem_RawMalloc(size);
+        if (ptr == NULL) {
+            throw PyBadAlloc("PyMem_RawMalloc returned NULL");
+        }
+        return ptr;
+    }
+
+    void deallocate(void* ptr) noexcept override {
+        if (ptr == nullptr || ptr == NULL) {
+            return;
+        }
+        return PyMem_RawFree(ptr);
+    }
+};
+
+Allocator* getDefaultAllocator() {
+    static WrapperOfPyAllocator allocator;
+    return &allocator;
+}
 
 typedef struct {
     PyObject_HEAD
@@ -91,8 +130,8 @@ static int CSRAdjacencyMatrixObject_init(CSRAdjacencyMatrixObject* self, PyObjec
     catch (const exception& error) {
         PyErr_SetString(PyExc_RuntimeError, error.what());
         return -1;
-    }    
-catch (...) {
+    }
+    catch (...) {
         PyErr_SetString(PyExc_RuntimeError, "Unknown error");
         return -1;
     }
@@ -165,7 +204,7 @@ static PyObject* CSRAdjacencyMatrixObject_add_row(CSRAdjacencyMatrixObject* self
 }
 
 static PyObject* CSRAdjacencyMatrixObject_finalize(CSRAdjacencyMatrixObject* self, PyObject* args) {
-    if(self->finalized){
+    if (self->finalized) {
         PyErr_SetString(PyExc_ValueError, "Already finalized");
     }
     try {
@@ -210,7 +249,7 @@ static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject*
     }
 
     size_t sourcesNumpyArraySize = (size_t) PyArray_DIM(sourcesNumpyArray, 0);
-    if (!self->finalized){
+    if (!self->finalized) {
         PyErr_SetString(PyExc_ValueError, "Matrix is not finalized");
     }
     if (sourcesNumpyArraySize > self->matrix->getSize()) {
@@ -248,7 +287,8 @@ static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject*
                 threshold,
                 getDefaultAllocator()
             );
-        }else {
+        }
+        else {
             PFA<double> pfa;
             resultBitmap = pfa.run(
                 *(self->matrix),
@@ -277,7 +317,8 @@ static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject*
                 *idx = i;
             }
         }
-    }catch (const exception& error) {
+    }
+    catch (const exception& error) {
         PyErr_SetString(PyExc_RuntimeError, error.what());
         Py_XDECREF(resultArray);
         return NULL;

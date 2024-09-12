@@ -57,7 +57,7 @@ file(MAKE_DIRECTORY ${SPHINX_OUTPUT})
 # - Конфиг Sphinx был обновлен
 add_custom_command(
     OUTPUT ${SPHINX_INDEX_FILE}
-    COMMAND ${SPHINX_EXECUTABLE} ARGS "-b" "html" "-Dbreathe_projects.hkreduce=${DOXYGEN_OUTPUT_DIR}/xml" "${SPHINX_SOURCE}" "${SPHINX_OUTPUT}"
+    COMMAND ${SPHINX_EXECUTABLE} -b html -Dbreathe_projects.hkreduce=${DOXYGEN_OUTPUT_DIR}/xml ${SPHINX_SOURCE} ${SPHINX_OUTPUT}
     WORKING_DIRECTORY ${SPHINX_OUTPUT}
     DEPENDS ${SPHINX_SOURCE}/index.rst ${DOXYGEN_INDEX_FILE}
     MAIN_DEPENDENCY ${SPHINX_SOURCE}/conf.py

@@ -34,7 +34,7 @@ private:
         };
 
         size_t idxToInsert = bsearchLeftToInsert<size_t>(
-            &orderedQueue,
+            orderedQueue,
             node,
             compare
         );
@@ -63,7 +63,7 @@ private:
         };
 
         size_t idxToInsert = bsearchLeftToInsert<size_t>(
-            &orderedQueue,
+            orderedQueue,
             node,
             compareToInsert
         );
@@ -91,7 +91,7 @@ private:
         };
 
         size_t currentIdx = bsearchLeft<size_t>(
-            &orderedQueue,
+            orderedQueue,
             node,
             compareToSearch
         );     
