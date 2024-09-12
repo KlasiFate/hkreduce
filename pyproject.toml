@@ -1,11 +1,12 @@
 [tool.poetry]
-name = "reducing-graph"
+name = "hkreduce"
 version = "0.1.0"
 description = ""
 authors = ["KlasiFate <klasifate@gmail.com>"]
 readme = "README.md"
-packages = [{include = "reducing_graph"}]
-package-mode = false
+packages = [{include = "hkreduce", from = "python"}]
+package-mode = true
+build = "build_by_poetry.py"
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -27,5 +28,5 @@ cantera = "^3.0.1"
 mypy = "^1.11.2"
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core", "setuptools", "wheel"]
 build-backend = "poetry.core.masonry.api"

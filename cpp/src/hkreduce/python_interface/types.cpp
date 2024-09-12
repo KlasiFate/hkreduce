@@ -20,6 +20,7 @@
 typedef struct {
     PyObject_HEAD
         size_t nextRowIdx;
+    bool finalized;
     CSRAdjacencyMatrix<double>* matrix;
 } CSRAdjacencyMatrixObject;
 
@@ -35,6 +36,7 @@ static PyObject* CSRAdjacencyMatrixObject_new(PyTypeObject* type, PyObject* args
     self = (CSRAdjacencyMatrixObject*) type->tp_alloc(type, 0);
     if (self != NULL) {
         self->matrix = nullptr;
+        self->finalized = false;
     }
     return (PyObject*) self;
 }
@@ -163,6 +165,9 @@ static PyObject* CSRAdjacencyMatrixObject_add_row(CSRAdjacencyMatrixObject* self
 }
 
 static PyObject* CSRAdjacencyMatrixObject_finalize(CSRAdjacencyMatrixObject* self, PyObject* args) {
+    if(self->finalized){
+        PyErr_SetString(PyExc_ValueError, "Already finalized");
+    }
     try {
         size_t accumulate = 0;
         IndexableCollection<size_t>& rows = *self->matrix->getRows();
@@ -182,13 +187,12 @@ static PyObject* CSRAdjacencyMatrixObject_finalize(CSRAdjacencyMatrixObject* sel
     return Py_None;
 };
 
-static PyObject* run_reducing(PyObject* self, PyObject* args) {
-    CSRAdjacencyMatrixObject* csr_matrix = NULL;
+static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject* self, PyObject* args) {
     char method[6]; // len("DRGEP") + 1 == 6
     double threshold;
     PyArrayObject* sourcesNumpyArray = NULL;
 
-    if (!PyArg_ParseTuple(args, "OsdO:run_reducing", &csr_matrix, &method, &threshold, &sourcesNumpyArray)) {
+    if (!PyArg_ParseTuple(args, "sdO:run_reducing", &method, &threshold, &sourcesNumpyArray)) {
         return NULL;
     }
 
@@ -206,8 +210,10 @@ static PyObject* run_reducing(PyObject* self, PyObject* args) {
     }
 
     size_t sourcesNumpyArraySize = (size_t) PyArray_DIM(sourcesNumpyArray, 0);
-
-    if (sourcesNumpyArraySize > csr_matrix->matrix->getSize()) {
+    if (!self->finalized){
+        PyErr_SetString(PyExc_ValueError, "Matrix is not finalized");
+    }
+    if (sourcesNumpyArraySize > self->matrix->getSize()) {
         PyErr_SetString(PyExc_ValueError, "The array's length is greater than matrix size");
         return NULL;
     }
@@ -228,7 +234,7 @@ static PyObject* run_reducing(PyObject* self, PyObject* args) {
         if (strcmp(method, "DRG")) {
             DRG<double> drg;
             resultBitmap = drg.run(
-                *(csr_matrix->matrix),
+                *(self->matrix),
                 sources,
                 threshold,
                 getDefaultAllocator()
@@ -237,7 +243,7 @@ static PyObject* run_reducing(PyObject* self, PyObject* args) {
         else if (strcmp(method, "DRGEP")) {
             DRGEP<double> drgep;
             resultBitmap = drgep.run(
-                *(csr_matrix->matrix),
+                *(self->matrix),
                 sources,
                 threshold,
                 getDefaultAllocator()
@@ -245,7 +251,7 @@ static PyObject* run_reducing(PyObject* self, PyObject* args) {
         }else {
             PFA<double> pfa;
             resultBitmap = pfa.run(
-                *(csr_matrix->matrix),
+                *(self->matrix),
                 sources,
                 threshold,
                 getDefaultAllocator()
@@ -265,7 +271,7 @@ static PyObject* run_reducing(PyObject* self, PyObject* args) {
             NULL
         );
 
-        for (size_t i = 0; i < csr_matrix->matrix->getSize(); ++i) {
+        for (size_t i = 0; i < self->matrix->getSize(); ++i) {
             if (resultBitmap[i]) {
                 size_t* idx = (size_t*) PyArray_GETPTR1(resultArray, (npy_intp) i);
                 *idx = i;
@@ -293,20 +299,26 @@ static PyMethodDef CSRAdjacencyMatrixObject_methods[] = {
         "add_row",
         (PyCFunction) CSRAdjacencyMatrixObject_add_row,
         METH_VARARGS,
-        "Add row to CSR matrix"
+        "Add row to CSR a matrix"
     },
     {
         "finalize",
         (PyCFunction) CSRAdjacencyMatrixObject_finalize,
         METH_NOARGS,
-        "Finalize matrix object. It accumulate rows array elements"
+        "Finalize a matrix object. It accumulate rows array elements"
+    },
+    {
+        "run_reducing",
+        (PyCFunction) CSRAdjacencyMatrixObject_run_reducing,
+        METH_VARARGS,
+        "Run reducing for a matrix"
     },
     {NULL, NULL, 0, NULL}  /* Sentinel */
 };
 
 static PyTypeObject CSRAdjacencyMatrixType = {
     .ob_base = PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "hkreduce.c_interface.CSRAdjacencyMatrix",
+    .tp_name = "hkreduce.cpp_interface.CSRAdjacencyMatrix",
     .tp_basicsize = sizeof(CSRAdjacencyMatrixObject),
     .tp_itemsize = 0,
     .tp_dealloc = (destructor) CSRAdjacencyMatrixObject_dealloc,
@@ -318,26 +330,20 @@ static PyTypeObject CSRAdjacencyMatrixType = {
     .tp_new = CSRAdjacencyMatrixObject_new,
 };
 
-static PyMethodDef c_interface_methods[] = {
-    {
-        "run_reducing",
-        run_reducing,
-        METH_VARARGS,
-        "Run reducing"
-    },
+static PyMethodDef cpp_interface_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
 static PyModuleDef c_interface_module = {
     .m_base = PyModuleDef_HEAD_INIT,
-    .m_name = "hkreduce.c_interface",
+    .m_name = "hkreduce.cpp_interface",
     .m_doc = "Module that provide python interface to interact with c++ layer",
     .m_size = -1,
-    .m_methods = c_interface_methods
+    .m_methods = cpp_interface_methods
 };
 
 PyMODINIT_FUNC
-PyInit_hkreduce_c_interface(void) {
+PyInit_cpp_interface(void) {
     PyObject* m;
     if (PyType_Ready(&CSRAdjacencyMatrixType) < 0) {
         return NULL;

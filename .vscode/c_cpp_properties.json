@@ -4,7 +4,7 @@
         {
             "name": "linux",
             "includePath": [
-                "${workspaceFolder}/include",
+                "${workspaceFolder}/cpp/include",
                 "/usr/local/include/python3.10",
                 "${workspaceFolder}/.venv/lib/python3.10/site-packages/numpy/_core/include"
             ],
@@ -17,7 +17,7 @@
                 "databaseFilename": "${default}",
                 "path": [
                     "${default}",
-                    "${workspaceFolder}/include",
+                    "${workspaceFolder}/cpp/include",
                     "/usr/local/include/python3.10",
                     "${workspaceFolder}/.venv/lib/python3.10/site-packages/numpy/_core/include"
                 ]

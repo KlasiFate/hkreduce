@@ -20,10 +20,6 @@ endif()
 
 
 set(OUTPUT_DIR ${PROJECT_SOURCE_DIR}/output)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${OUTPUT_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${OUTPUT_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${OUTPUT_DIR}/bin)
 
-
-add_subdirectory(src)
+add_subdirectory(cpp/src)
 add_subdirectory(docs)
