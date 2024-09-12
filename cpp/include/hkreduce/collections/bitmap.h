@@ -130,6 +130,8 @@ public:
         for(size_t i = 0; i < sectionsCount; ++i){
             this->boolSections->append(other.boolSections->operator[](i));
         }
+
+        return *this;
     }
 
     Bitmap& operator=(Bitmap&& other) noexcept {

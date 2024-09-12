@@ -4,10 +4,9 @@ import os
 import platform
 import re
 import subprocess
-import sys
 from pathlib import Path
 from pprint import pprint
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, TypeAlias, cast
 
 from setuptools import Extension, setup  # type: ignore[import-untyped]
 from setuptools.command.build_ext import build_ext  # type: ignore[import-untyped]
@@ -50,11 +49,14 @@ class CMakeBuilder(build_ext):
             extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext_name=ext.name)))
             cfg = "Debug" if self.debug == "ON" else "Release"
 
+            ext_filename = cast(str, self.get_ext_filename(self.get_ext_fullname(ext_name=ext.name))).split("/")[-1]
+            library_output_name = ".".join(ext_filename.split("/")[-1].split(".")[:-1:])
+
             cmake_args = [
                 f"-DCMAKE_BUILD_TYPE={cfg}",
                 f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY_{cfg.upper()}={extdir}",
                 f"-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY_{cfg.upper()}={self.build_temp}",
-                f"-DPYTHON_EXECUTABLE={sys.executable}",
+                f"-DLIBRARY_OUTPUT_NAME={library_output_name}",
             ]
 
             if platform.system() == "Windows":
@@ -89,7 +91,7 @@ class CMakeBuilder(build_ext):
 
 
 PROJECT_DIR = Path(__file__).parent
-CPP_SOURCE = PROJECT_DIR / "python/cpp_extension/hkreduce/cpp_interface.cpp"
+CPP_SOURCE = PROJECT_DIR / "hkreduce/cpp_interface.cpp"
 
 EXT_MODULES = [CMakeExtension(name="hkreduce.cpp_interface", cmake_lists_dir=PROJECT_DIR, sources=[CPP_SOURCE])]
 

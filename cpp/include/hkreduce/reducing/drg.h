@@ -60,7 +60,7 @@ private:
 
         void deallocate(void* ptr) noexcept override {
             ssize_t idx = (ssize_t) ((char*) ptr - this->space);  
-            if(idx < 0 || idx >= this->maxStackSize * this->innerIteratorSize){
+            if(idx < 0 || idx >= (ssize_t)(this->maxStackSize * this->innerIteratorSize)){
                 this->originalAllocator->deallocate(ptr);
                 return;
             }

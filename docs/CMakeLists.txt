@@ -4,7 +4,7 @@ find_package(Sphinx REQUIRED)
 
 
 # Поиск всех необходимых заголовков самого приложения
-get_target_property(HEADER_DIRS hkreduce INCLUDE_DIRECTORIES)
+get_target_property(HEADER_DIRS hkreduce_cpp_interface INCLUDE_DIRECTORIES)
 file(GLOB_RECURSE HEADER_DIRS ${HEADER_DIRS}/*.h)
 
 

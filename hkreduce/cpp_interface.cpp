@@ -162,7 +162,7 @@ static PyObject* CSRAdjacencyMatrixObject_add_row(CSRAdjacencyMatrixObject* self
         PyErr_SetString(PyExc_ValueError, "The array's length doesn't equal matrix size");
         return NULL;
     }
-    if (PyArray_FLAGS(array) | NPY_C_CONTIGUOUS == 0) {
+    if ((PyArray_FLAGS(array) | NPY_C_CONTIGUOUS) == 0) {
         PyErr_SetString(PyExc_ValueError, "The array is not in C format of storing data");
         return NULL;
     }
@@ -256,7 +256,7 @@ static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject*
         PyErr_SetString(PyExc_ValueError, "The array's length is greater than matrix size");
         return NULL;
     }
-    if (PyArray_FLAGS(sourcesNumpyArray) | NPY_C_CONTIGUOUS == 0) {
+    if ((PyArray_FLAGS(sourcesNumpyArray) | NPY_C_CONTIGUOUS) == 0) {
         PyErr_SetString(PyExc_ValueError, "The array is not in C format of storing data");
         return NULL;
     }
@@ -332,7 +332,7 @@ static PyObject* CSRAdjacencyMatrixObject_run_reducing(CSRAdjacencyMatrixObject*
 };
 
 static PyMemberDef CSRAdjacencyMatrixObject_members[] = {
-    {NULL}
+    {NULL, 0, 0, 0, NULL}
 };
 
 static PyMethodDef CSRAdjacencyMatrixObject_methods[] = {

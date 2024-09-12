@@ -257,7 +257,6 @@ public:
     }
     TCoef setCoef(TCoef coef) override {
         CSRAdjacencyMatrix<TCoef>* matrix = static_cast<CSRAdjacencyMatrix<TCoef>*>(this->getMatrix());
-        IndexableCollection<size_t>& cols = *(matrix->getCols());
         IndexableCollection<TCoef>& coefs = *(matrix->getCoefs());
 
         TCoef old = coefs[this->idx];

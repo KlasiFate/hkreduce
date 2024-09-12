@@ -1,4 +1,6 @@
 #pragma once
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Woverloaded-virtual" 
 
 #include <cstring>
 #include <functional>
@@ -148,7 +150,7 @@ public:
         if (idx >= this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
-        T old(move(this->array[idx]));
+        T old(std::move(this->array[idx]));
         this->array[idx] = element;
         return old;
     }
@@ -177,9 +179,9 @@ protected:
                 return;
             }
 
-            new (this->array + this->getSize()) T(move(this->array[this->getSize() - 1]));
+            new (this->array + this->getSize()) T(std::move(this->array[this->getSize() - 1]));
             for (size_t i = this->getSize() - 1; i > idx; --i) {
-                this->array[i] = move(this->array[i - 1]);
+                this->array[i] = std::move(this->array[i - 1]);
             }
             ++this->initalizedElements;
 
@@ -188,7 +190,7 @@ protected:
             }
             catch (...) {
                 for (size_t i = idx; i < this->getSize(); ++i) {
-                    this->array[i] = move(this->array[i + 1]);
+                    this->array[i] = std::move(this->array[i + 1]);
                 }
                 throw;
             }
@@ -198,7 +200,7 @@ protected:
         }
 
         for (size_t i = this->getSize(); i > idx; --i) {
-            this->array[i] = move(this->array[i - 1]);
+            this->array[i] = std::move(this->array[i - 1]);
         }
 
         try {
@@ -206,7 +208,7 @@ protected:
         }
         catch (...) {
             for (size_t i = idx; i < this->getSize(); ++i) {
-                this->array[i] = move(this->array[i + 1]);
+                this->array[i] = std::move(this->array[i + 1]);
             }
             throw;
         }
@@ -219,10 +221,10 @@ public:
         T* elementPtr = &element;
         this->insertUsingFunction(idx, [elementPtr] (T* place, bool assign) -> void {
             if (assign) {
-                *place = move(*elementPtr);
+                *place = std::move(*elementPtr);
             }
             else {
-                new (place) T(move(*elementPtr));
+                new (place) T(std::move(*elementPtr));
             }
             });
     }
@@ -232,7 +234,7 @@ public:
             throw out_of_range("Idx is out of range");
         }
 
-        T old = move(this->array[idx]);
+        T old = std::move(this->array[idx]);
 
         if (is_trivial<T>::value) {
             memmove(this->array + idx, this->array + idx + 1, sizeof(T) * (this->getSize() - idx - 1));
@@ -242,7 +244,7 @@ public:
         }
 
         for (size_t i = idx; i < this->getSize() - 1; ++i) {
-            this->array[i] = move(this->array[i + 1]);
+            this->array[i] = std::move(this->array[i + 1]);
         }
         this->setSize(this->getSize() - 1);
         return old;
@@ -398,12 +400,12 @@ public:
         if (idx >= this->getSize()) {
             throw out_of_range("Idx is out of range");
         }
-        T old(move(this->array[idx]));
+        T old(std::move(this->array[idx]));
         try {
             this->array[idx] = element;
         }
         catch (...) {
-            this->array[idx] = move(old);
+            this->array[idx] = std::move(old);
             throw;
         }
         return old;
@@ -471,7 +473,7 @@ public:
         }
 
         for (size_t i = 0; i < this->getSize(); ++i) {
-            new (newArray + i) T(move(this->array[i]));
+            new (newArray + i) T(std::move(this->array[i]));
         }
         for (size_t i = 0; i < this->initalizedElements; ++i) {
             this->array[i].~T();
@@ -516,14 +518,14 @@ protected:
         }
 
         for (size_t i = 0; i < idx; ++i) {
-            new (newArray + i) T(move(this->array[i]));
+            new (newArray + i) T(std::move(this->array[i]));
         }
         try {
             constructAtPlace(newArray + idx);
         }
         catch (...) {
             for (size_t i = 0; i < idx; ++i) {
-                this->array[i] = move(newArray[i]);
+                this->array[i] = std::move(newArray[i]);
                 newArray[i].~T();
             }
             this->getAllocator()->deallocate((void*) newArray);
@@ -531,7 +533,7 @@ protected:
         }
 
         for (size_t i = idx; i < this->getSize(); ++i) {
-            new (newArray + i + 1) T(move(this->array[i]));
+            new (newArray + i + 1) T(std::move(this->array[i]));
         }
 
         for (size_t i = 0; i < this->initalizedElements; ++i) {
@@ -554,7 +556,7 @@ public:
             return ArrayCollection<T>::insert(idx, element);
         }
         T* elementPtr = &element;
-        this->insertUsingFunction(idx, [elementPtr] (T* place) -> void {new (place) T(move(*elementPtr));});
+        this->insertUsingFunction(idx, [elementPtr] (T* place) -> void {new (place) T(std::move(*elementPtr));});
     }
 
     T remove(size_t idx) override {
@@ -565,7 +567,7 @@ public:
             throw out_of_range("idx is out of range");
         }
 
-        T old(move(this->array[idx]));
+        T old(std::move(this->array[idx]));
 
         this->setSize(this->getSize() - 1);
 
@@ -591,10 +593,10 @@ public:
         }
 
         for (size_t i = 0; i < idx; ++i) {
-            new (newArray + i) T(move(this->array[i]));
+            new (newArray + i) T(std::move(this->array[i]));
         }
         for (size_t i = idx; i < this->getSize(); ++i) {
-            new (newArray + i) T(move(this->array[i + 1]));
+            new (newArray + i) T(std::move(this->array[i + 1]));
         }
 
         for (size_t i = 0; i < this->initalizedElements; ++i) {
@@ -676,12 +678,12 @@ public:
         }
     }
 
-    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
+    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(std::move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
 
     DArrayCollection() : ArrayCollection<T>(), DArrayCollectionCommonMethods<T>(0) { }
 
     DArrayCollection<T, false>& operator=(DArrayCollection<T, false>&& other) {
-        DArrayCollectionCommonMethods<T>::operator=(move(other));
+        DArrayCollectionCommonMethods<T>::operator=(std::move(other));
         return *this;
     }
 
@@ -746,12 +748,12 @@ public:
         }
     }
 
-    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
+    DArrayCollection(DArrayCollection<T>&& other) noexcept : ArrayCollection<T>(std::move(other)), DArrayCollectionCommonMethods<T>(other.blockSize) { };
 
     DArrayCollection() : ArrayCollection<T>(), DArrayCollectionCommonMethods<T>(0) { }
 
     DArrayCollection<T, true>& operator=(DArrayCollection<T, true>&& other) {
-        DArrayCollectionCommonMethods<T>::operator=(move(other));
+        DArrayCollectionCommonMethods<T>::operator=(std::move(other));
         return *this;
     }
 

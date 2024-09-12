@@ -1,4 +1,6 @@
 #pragma once
+#pragma GCC diagnostic push 
+#pragma GCC diagnostic ignored "-Woverloaded-virtual" 
 
 #include "../allocators/default.h"
 #include "../utils/type_traits.h"
@@ -93,7 +95,7 @@ public:
 
     SectionedCollectionCommonMethods(SectionedCollectionCommonMethods<T>&& other) noexcept :
         IndexableCollection<T>(other.getSize(), other.getAllocator()),
-        sections(move(other.sections)),
+        sections(std::move(other.sections)),
         sectionSize(other.sectionSize),
         collectionInitialized(other.collectionInitialized) { };
 
@@ -102,7 +104,7 @@ public:
             return *this;
         }
 
-        this->sections = move(other.sections);
+        this->sections = std::move(other.sections);
         this->sectionSize = other.sectionSize;
         this->collectionInitialized = other.collectionInitialized;
         this->setSize(other.getSize());
@@ -111,7 +113,7 @@ public:
         return *this;
     }
 
-    size_t getAllocatedSize() const {
+    size_t getAllocatedSize() const override {
         return this->sectionSize * this->sections.getSize();
     };
 
@@ -143,7 +145,7 @@ public:
         }
         size_t sectionIdx = idx / this->getSectionSize();
         size_t idxInSection = idx % this->getSectionSize();
-        T old(move(this->sections[sectionIdx][idxInSection]));
+        T old(std::move(this->sections[sectionIdx][idxInSection]));
         this->sections[sectionIdx][idxInSection] = element;
         return old;
     };
@@ -170,7 +172,7 @@ public:
         }
     }
 
-    void insert(size_t idx, T&& element) {
+    void insert(size_t idx, T&& element) override {
         if (idx > this->getSize()) {
             throw out_of_range("idx argument is out of range");
         }
@@ -190,7 +192,6 @@ public:
 
         size_t lastUsedSectionIdx = (this->getSize() + 1) / this->sectionSize;
         for (size_t i = lastUsedSectionIdx; i > sectionIdx; --i) {
-            Section& prevSection = this->sections[i - 1];
             this->sections[i].insert(0, this->sections[i - 1].remove(this->sectionSize - 1));
         }
 
@@ -207,7 +208,7 @@ public:
         size_t idxInSection = idx % this->sectionSize;
 
         Section& section = this->sections[sectionIdx];
-        T result(section.remove(sectionIdx));
+        T result(section.remove(idxInSection));
 
         if (section.getSize() + 1 == this->sectionSize) {
             size_t lastUsedSectionIdx = (this->getSize() - 1) / this->sectionSize;
@@ -332,17 +333,17 @@ public:
         }
         size_t sectionIdx = idx / this->getSectionSize();
         size_t idxInSection = idx % this->getSectionSize();
-        T old(move(this->sections[sectionIdx][idxInSection]));
+        T old(std::move(this->sections[sectionIdx][idxInSection]));
         try {
             this->sections[sectionIdx][idxInSection] = element;
         }catch (...) {
-            this->sections[sectionIdx][idxInSection] = move(old);
+            this->sections[sectionIdx][idxInSection] = std::move(old);
             throw;
         }
         return old;
     };
 
-    void insert(size_t idx, const T& element) {
+    void insert(size_t idx, const T& element) override {
         if (idx > this->getSize()) {
             throw out_of_range("idx argument is out of range");
         }
@@ -362,7 +363,6 @@ public:
 
         size_t lastUsedSectionIdx = this->getSize() / this->sectionSize;
         for (size_t i = lastUsedSectionIdx; i > sectionIdx; --i) {
-            Section& prevSection = this->sections[i - 1];
             this->sections[i].insert(0, this->sections[i - 1].remove(this->sectionSize - 1));
         }
 

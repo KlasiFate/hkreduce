@@ -4,7 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["KlasiFate <klasifate@gmail.com>"]
 readme = "README.md"
-packages = [{include = "hkreduce", from = "python"}]
+packages = [{include = "hkreduce"}]
 package-mode = true
 build = "build_by_poetry.py"
 
@@ -28,5 +28,5 @@ cantera = "^3.0.1"
 mypy = "^1.11.2"
 
 [build-system]
-requires = ["poetry-core", "setuptools", "wheel"]
+requires = ["poetry-core", "setuptools", "wheel", "numpy"]
 build-backend = "poetry.core.masonry.api"

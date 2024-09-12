@@ -162,7 +162,6 @@ public:
 
         Bitmap result(matrix.getSize(), false, allocator);
 
-        size_t* queueArray = (size_t*) allocator->allocate(matrix.getSize() * sizeof(size_t));
         for(size_t i = 0; i < sources.getSize(); ++i){
             size_t source = sources[i];
 
