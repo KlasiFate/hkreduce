@@ -13,27 +13,29 @@ using namespace std;
 template<class TCoef>
 class DRGEP {
 private:
-    void insertToOrderedQueue(
+    void insertToQueue(
         ArrayCollection<size_t>& orderedQueue,
         ArrayCollection<TCoef>& pathsLengths,
-        size_t node
+        size_t node,
+        TCoef newNodeLength
     ) const {
-        function<bool(const size_t&, const size_t&)> compare = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+        // The second argument of the function below always equals the second "element" argument of the bsearchRightToInsert
+        function<bool(const size_t&, const size_t&)> compare = [&pathsLengths, newNodeLength](const size_t& middleElement, const size_t& node) -> int {
             TCoef middleElementPath = pathsLengths[middleElement];
-            TCoef elementPath = pathsLengths[element];
-            if(middleElementPath < elementPath){
+
+            if(middleElementPath < newNodeLength){
                 return true;
             }
-            if(middleElementPath > elementPath){
+            if(middleElementPath > newNodeLength){
                 return false;
             }
-            if(middleElement <= element){
+            if(middleElement <= node){
                 return true;
             }
             return false;
         };
 
-        size_t idxToInsert = bsearchLeftToInsert<size_t>(
+        size_t idxToInsert = bsearchRightToInsert<size_t>(
             orderedQueue,
             node,
             compare
@@ -45,52 +47,50 @@ private:
     void updateQueue(
         ArrayCollection<size_t>& orderedQueue,
         ArrayCollection<TCoef>& pathsLengths,
-        size_t node
+        size_t node,
+        TCoef newNodeLength
     ) const {
-        function<bool(const size_t&, const size_t&)> compareToInsert = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+        function<bool(const size_t&, const size_t&)> compareToInsert = [&pathsLengths, newNodeLength](const size_t& middleElement, const size_t& node) -> int {
             TCoef middleElementPath = pathsLengths[middleElement];
-            TCoef elementPath = pathsLengths[element];
-            if(middleElementPath < elementPath){
+
+            if(middleElementPath < newNodeLength){
                 return true;
             }
-            if(middleElementPath > elementPath){
+            if(middleElementPath > newNodeLength){
                 return false;
             }
-            if(middleElement <= element){
+            if(middleElement <= node){
                 return true;
             }
             return false;
         };
 
-        size_t idxToInsert = bsearchLeftToInsert<size_t>(
+        size_t idxToInsert = bsearchRightToInsert<size_t>(
             orderedQueue,
             node,
             compareToInsert
         );
 
-        if(pathsLengths[node] == 0){
-            throw invalid_argument("No provided node in ordered queue");
-        }
-
-        function<int(const size_t&, const size_t&)> compareToSearch = [&pathsLengths](const size_t& middleElement, const size_t& element) -> int {
+        TCoef nodeLength = pathsLengths[node];
+        function<int(const size_t&, const size_t&)> compareToSearch = [&pathsLengths, nodeLength](const size_t& middleElement, const size_t& node) -> int {
             TCoef middleElementPath = pathsLengths[middleElement];
-            TCoef elementPath = pathsLengths[element];
-            if(middleElementPath < elementPath){
+
+            if(middleElementPath < nodeLength){
                 return 1;
             }
-            if(middleElementPath > elementPath){
+            if(middleElementPath > nodeLength){
                 return -1;
             }
-            if(middleElement < element){
+            if(middleElement < node){
                 return 1;
             }
-            if(middleElement > element){
+            if(middleElement > node){
                 return -1;
             }
             return 0;
         };
 
-        size_t currentIdx = bsearchLeft<size_t>(
+        size_t currentIdx = bsearchRight<size_t>(
             orderedQueue,
             node,
             compareToSearch
@@ -132,20 +132,21 @@ private:
 
             for(; !iterator.getStopped(); ++iterator){
                 size_t neighbour = iterator.getTo();
-                TCoef neighbourPathLength = iterator.getCoef() * currentPathLength;
-                if(neighbourPathLength <= pathsLengths[neighbour]){
+                TCoef newNeighbourPathLength = iterator.getCoef() * currentPathLength;
+                if(newNeighbourPathLength <= pathsLengths[neighbour]){
                     continue;
                 }
-                if(neighbourPathLength < threshold){
+                if(newNeighbourPathLength < threshold){
                     continue;
                 }
-                TCoef old = pathsLengths.replace(neighbour, neighbourPathLength);
 
-                if(old == 0){
-                    this->insertToOrderedQueue(orderedQueue, pathsLengths, neighbour);
+                TCoef oldNeighbourPathLength = pathsLengths[neighbour];
+                if(oldNeighbourPathLength == 0){
+                    this->insertToQueue(orderedQueue, pathsLengths, neighbour, newNeighbourPathLength);
                 }else{
-                    this->updateQueue(orderedQueue, pathsLengths, neighbour);
+                    this->updateQueue(orderedQueue, pathsLengths, neighbour, newNeighbourPathLength);
                 }
+                pathsLengths.replace(neighbour, newNeighbourPathLength);
             }
         }
     }
@@ -180,7 +181,6 @@ public:
             }
 
             if(i + 1 < sources.getSize()){
-                orderedQueue.clear();
                 memset((void*) pathsLengths.getArray(), 0, matrix.getSize() * sizeof(TCoef));
             }
         }

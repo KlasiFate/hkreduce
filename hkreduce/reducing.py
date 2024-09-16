@@ -11,8 +11,7 @@ from numpy.typing import NDArray
 
 from .algorithms import create_matrix_for_drg, create_matrix_for_drgep, create_matrix_for_pfa
 from .cpp_interface import CSRAdjacencyMatrix
-from .cpp_interface import run as run_reducing
-from .logging import get_logger, setup_config
+from .logging import get_logger
 from .typing import PathLike, ReducingMethod
 from .utils import NumpyArrayDumper, WorkersCloser, create_unique_file
 
@@ -24,6 +23,7 @@ class Command(int, Enum):
 
 class Answer(int, Enum):
     INITIALIZED = auto()
+    MATRIX_CREATED = auto()
     ERROR = auto()
     REDUCED = auto()
 
@@ -39,8 +39,6 @@ class Reducer:
         ai_condition_idx: int,
         conn: Connection,
         sem: BoundedSemaphore,
-        *,
-        debug: bool,
     ) -> None:
         self.model_path = model_path
         self.method = method
@@ -51,14 +49,15 @@ class Reducer:
         self.ai_condition_idx = ai_condition_idx
         self.conn = conn
         self.sem = sem
-        self.debug = debug
+
+        self.logger = get_logger()
 
     def _create_matrix(self) -> CSRAdjacencyMatrix:
         model = Solution(self.model_path)
 
         with self.state_saver.open("r"):
             state = self.state_saver.read_data()
-        temperature, pressure = state[::2]
+        temperature, pressure = state[:2:]
         mass_fractions = state[2::]
 
         if self.method == ReducingMethod.DRG:
@@ -70,7 +69,7 @@ class Reducer:
     def _reduce(self, threshold: float, matrix: CSRAdjacencyMatrix) -> NumpyArrayDumper:
         with self.sources_saver.open("r"):
             sources = cast(NDArray[np.uintp], self.sources_saver.read_data())
-        retained_species = run_reducing(matrix, self.method.name, threshold, sources)  # type: ignore[arg-type]
+        retained_species = matrix.run_reducing(self.method.name, threshold, sources)  # type: ignore[arg-type]
         prefix = f"retained_species_for_{self.ai_condition_idx}_case_with_threshold_{str(threshold).replace('.', '__')}"
         filepath = create_unique_file(
             dir=self.tmp_dir,
@@ -82,19 +81,14 @@ class Reducer:
         return retained_species_saver
 
     def run(self) -> None:
-        setup_config(debug=self.debug)
-        logger = get_logger()
+        self.conn.send((Answer.INITIALIZED, ()))
 
         try:
+            self.logger.info(f"Creating matrix for one of states of {self.ai_condition_idx} case")
             with self.sem:
                 matrix = self._create_matrix()
-            self.conn.send((Answer.INITIALIZED, ()))
-        except Exception:  # noqa: BLE001
-            logger.opt(exception=True).critical("Error while creating csr matrix")
-            self.conn.send((Answer.ERROR, ()))
-            return
-
-        try:
+                self.conn.send((Answer.MATRIX_CREATED, ()))
+            self.logger.info(f"Matrix created for one of states of {self.ai_condition_idx} case")
             while True:
                 command, command_args = cast(tuple[Command, tuple[Any, ...]], self.conn.recv())
                 if command == Command.STOP:
@@ -102,11 +96,16 @@ class Reducer:
                 threshold = cast(tuple[float], command_args)[0]
                 with self.sem:
                     retained_species_saver = self._reduce(threshold, matrix)
-                    self.conn.send((Answer.REDUCED, (retained_species_saver)))
+                    self.conn.send((Answer.REDUCED, (retained_species_saver,)))
+        except KeyboardInterrupt:
+            self.logger.info(f"Cancelling reducer process for one of states of {self.ai_condition_idx} case")
         except Exception:  # noqa: BLE001
-            logger.opt(exception=True).critical("Error while reducing")
+            self.logger.opt(exception=True).critical(
+                f"Error while reducing or creating matrix  for one of states of {self.ai_condition_idx} case"
+            )
             self.conn.send((Answer.ERROR, ()))
-            return
+        finally:
+            self.logger.complete()
 
 
 class ReducersManager:
@@ -116,22 +115,24 @@ class ReducersManager:
         method: ReducingMethod,
         samples_savers: list[NumpyArrayDumper],
         sources: NDArray[np.uintp],
+        retained_species: NDArray[np.uintp],
         tmp_dir: PathLike,
-        debug: bool,  # noqa: FBT001
         num_threads: int,
     ) -> None:
         self.model_path = model_path
         self.method = method
         self.samples_savers = samples_savers
+        self.retained_species = retained_species
 
         self.tmp_dir = tmp_dir
-        self.debug = debug
 
         self._sources_saver = self._create_sources_saver(sources, tmp_dir)
 
         self._reducers: list[tuple[Process, Connection]] | None = None
         self._workers_closer: WorkersCloser | None = None
         self._sem = multiprocessing.BoundedSemaphore(num_threads)
+
+        self._matrixes_created = False
 
     @classmethod
     def _create_sources_saver(cls, sources: NDArray[np.uintp], tmp_dir: PathLike) -> NumpyArrayDumper:
@@ -177,7 +178,6 @@ class ReducersManager:
                         sem=self._sem,
                         ai_condition_idx=ai_cond_idx,
                         conn=for_reducer,
-                        debug=self.debug,
                     )
 
                     process_name = f"reduces_for_{ai_cond_idx}_ai_condition_and_{state_idx}_state"
@@ -192,6 +192,7 @@ class ReducersManager:
         logger.debug("Creating reducers")
         self._reducers = self._create_reducers()
         logger.debug("Starting reducers")
+        logger.info("Creating matrixes")
         self._workers_closer = WorkersCloser(self._reducers)
         self._workers_closer.open()
 
@@ -211,20 +212,30 @@ class ReducersManager:
 
     def reduce(self, threshold: float) -> set[int]:
         assert self._reducers is not None  # noqa: S101
-        for process, conn in self._reducers:
-            if not process.is_alive():
-                raise RuntimeError("Reducer process is dead")
+        logger = get_logger()
 
+        if not self._matrixes_created:
+            for __, conn in self._reducers:
+                message, details = cast(tuple[Answer, tuple[Any, ...]], conn.recv())
+                if message != Answer.MATRIX_CREATED:
+                    raise RuntimeError("Error in reducer process. Creating matrix failed")
+
+            logger.info("Matrixes created")
+
+            self._matrixes_created = True
+
+        for __, conn in self._reducers:
             conn.send((Command.REDUCE, (threshold,)))
 
+        retained_species: set[int] = set(self.retained_species)
+        for __, conn in self._reducers:
             message, details = cast(tuple[Answer, tuple[Any, ...]], conn.recv())
 
             if message != Answer.REDUCED:
                 raise RuntimeError("Error in reducer process. Reduce failed")
 
-            retained_species: set[int] = set()
             retained_species_saver = cast(NumpyArrayDumper, details[0])
             with retained_species_saver.open("r"):
-                retained_species.union(cast(NDArray[np.uintp], retained_species_saver.read_data()))
+                retained_species = retained_species.union(cast(NDArray[np.uintp], retained_species_saver.read_data()))
 
         return retained_species

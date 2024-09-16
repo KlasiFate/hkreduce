@@ -50,7 +50,9 @@ public:
     // и оно может быть вычислено 
     virtual size_t getAllocatedSize() const = 0;
 
-    Allocator* getAllocator() const;
+    Allocator* getAllocator() const {
+        return this->allocator;
+    };
     
     // Не все коллекции предоставляют возможность resize. Так что данный метод является опциональным для реализации
     virtual void resize(size_t size) {

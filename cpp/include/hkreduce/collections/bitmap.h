@@ -12,11 +12,77 @@ using namespace std;
 
 class Bitmap: public IndexableCollection<bool> {
 public:
-    typedef size_t BoolSection;
-    static constexpr size_t BITS_COUNT_IN_SECTION = sizeof(BoolSection) * 8;
-    static constexpr size_t BOOL_SECTION_SIZE = sizeof(BoolSection);
-    static constexpr BoolSection ALL_EQUAL_ONE = SIZE_MAX;
-    static constexpr BoolSection ALL_EQUAL_ZERO = 0;
+    class BoolSection{
+    public:
+        typedef size_t BitsType;
+        static constexpr size_t BITS_COUNT_IN_SECTION = sizeof(size_t) * 8;
+        static constexpr BitsType ALL_BITS_EQUAL_ONE = SIZE_MAX;
+        static constexpr BitsType ALL_BITS_EQUAL_ZERO = 0;
+
+        static constexpr BitsType BIT_1 = 1;
+    private:
+        BitsType bits;
+
+    public:
+        BoolSection(bool value): bits(value ? ALL_BITS_EQUAL_ONE : ALL_BITS_EQUAL_ZERO){}
+        BoolSection() = default;
+
+        BoolSection(const BoolSection&) = default;
+        BoolSection& operator=(const BoolSection&) = default;
+
+        bool getBit(size_t bitIdx) const {
+            return this->bits & (BIT_1 << bitIdx);
+        }
+
+        bool setBit(size_t bitIdx, bool value){
+            bool old = this->getBit(bitIdx);
+            if(value){
+                this->bits |= BIT_1 << bitIdx;
+            }else{
+                this->bits &= ~(BIT_1 << bitIdx);
+            }
+            return old;
+        }
+
+        bool insert(size_t bitIdx, bool value){
+            bool leaved = this->getBit(BITS_COUNT_IN_SECTION - 1);
+            BitsType bitsBefore = this->bits & (ALL_BITS_EQUAL_ONE >> (BITS_COUNT_IN_SECTION - bitIdx));
+            BitsType bitsAfter = ((ALL_BITS_EQUAL_ONE << bitIdx) & this->bits) << 1;
+            this->bits = bitsBefore | bitsAfter;
+            this->setBit(bitIdx, value);
+            return leaved;
+        }
+
+        bool remove(size_t bitIdx, bool leftestValue){
+            bool leaved = this->getBit(bitIdx);
+            BitsType bitsBefore = this->bits & (ALL_BITS_EQUAL_ONE >> (BITS_COUNT_IN_SECTION - bitIdx));
+            BitsType bitsAfter = ((ALL_BITS_EQUAL_ONE << (bitIdx + 1)) & this->bits) >> 1;
+            this->bits = bitsBefore | bitsAfter;
+            this->setBit(BITS_COUNT_IN_SECTION - 1, leftestValue);
+            return leaved;
+        }
+
+        size_t countBits() const {
+            size_t res = 0;
+            for(int i = 0; i < 64; ++i){
+                if(this->bits & (BIT_1 << i)){
+                    ++res;
+                }
+            }
+            return res;
+        }
+    
+        BoolReference getReference(size_t idx){
+            return BoolReference(
+                &(this->bits),
+                BITS_COUNT_IN_SECTION,
+                idx
+            );
+        }
+    };
+
+    static_assert(sizeof(BoolSection) == sizeof(size_t), "BoolSection size doesn't equal sizeof(size_t)");
+    static_assert(is_trivial<BoolSection>::value, "BoolSection is not trivial");
 
 private:
     IndexableCollection<BoolSection>* boolSections;
@@ -29,7 +95,7 @@ public:
         bool deleteBoolSections = true,
         Allocator* allocator = getDefaultAllocator()
     ): IndexableCollection(size, allocator), boolSections(boolSections), deleteBoolSections(deleteBoolSections) {
-        if(this->boolSections->getSize() * BITS_COUNT_IN_SECTION < size){
+        if(this->boolSections->getSize() * BoolSection::BITS_COUNT_IN_SECTION < size){
             throw invalid_argument("Count of bits in sections is less than provided size");
         }
         if(this->getAllocator() != boolSections->getAllocator()){
@@ -43,18 +109,13 @@ public:
         Allocator* allocator = getDefaultAllocator()
     ): IndexableCollection(size, allocator), boolSections(nullptr), deleteBoolSections(true){
         this->boolSections = (SectionedCollection<BoolSection>*) this->getAllocator()->allocate(sizeof(SectionedCollection<BoolSection>));
-        size_t sectionsCount = size / BITS_COUNT_IN_SECTION;
-        if(size % BITS_COUNT_IN_SECTION != 0){
+        size_t sectionsCount = size / BoolSection::BITS_COUNT_IN_SECTION;
+        if(size % BoolSection::BITS_COUNT_IN_SECTION != 0){
             ++sectionsCount;
         }
 
-        BoolSection sectionValue = ALL_EQUAL_ZERO;
-        if(value){
-            sectionValue = ALL_EQUAL_ONE;
-        }
-
         try{
-            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, sectionValue, allocator, DEFAULT_BLOCK_SIZE / BITS_COUNT_IN_SECTION * 8);
+            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, BoolSection(value), allocator, DEFAULT_BLOCK_SIZE / BoolSection::BITS_COUNT_IN_SECTION * 8);
         }catch(...){
             allocator->deallocate((void*) this->boolSections);
             throw;
@@ -70,13 +131,13 @@ public:
         }
 
         this->boolSections = (SectionedCollection<BoolSection>*) this->getAllocator()->allocate(sizeof(SectionedCollection<BoolSection>));
-        size_t sectionsCount = this->getSize() / BITS_COUNT_IN_SECTION;
-        if(this->getSize() % BITS_COUNT_IN_SECTION != 0){
+        size_t sectionsCount = this->getSize() / BoolSection::BITS_COUNT_IN_SECTION;
+        if(this->getSize() % BoolSection::BITS_COUNT_IN_SECTION != 0){
             ++sectionsCount;
         }
 
         try{
-            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, this->getAllocator(), DEFAULT_BLOCK_SIZE / BITS_COUNT_IN_SECTION * 8);
+            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, this->getAllocator(), DEFAULT_BLOCK_SIZE / BoolSection::BITS_COUNT_IN_SECTION * 8);
         }catch(...){
             this->getAllocator()->deallocate((void*) this->boolSections);
             throw;
@@ -115,13 +176,13 @@ public:
         }
 
         this->boolSections = (SectionedCollection<BoolSection>*) this->getAllocator()->allocate(sizeof(SectionedCollection<BoolSection>));
-        size_t sectionsCount = this->getSize() / BITS_COUNT_IN_SECTION;
-        if(this->getSize() % BITS_COUNT_IN_SECTION != 0){
+        size_t sectionsCount = this->getSize() / BoolSection::BITS_COUNT_IN_SECTION;
+        if(this->getSize() % BoolSection::BITS_COUNT_IN_SECTION != 0){
             ++sectionsCount;
         }
 
         try{
-            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, this->getAllocator(), DEFAULT_BLOCK_SIZE / BITS_COUNT_IN_SECTION * 8);
+            new (this->boolSections) SectionedCollection<BoolSection>(sectionsCount, this->getAllocator(), DEFAULT_BLOCK_SIZE / BoolSection::ALL_BITS_EQUAL_ONE * 8);
         }catch(...){
             this->getAllocator()->deallocate((void*) this->boolSections);
             throw;
@@ -139,7 +200,7 @@ public:
             return *this;
         }
 
-        if(boolSections != nullptr && this->deleteBoolSections){
+        if(this->boolSections != nullptr && this->deleteBoolSections){
             this->boolSections->~IndexableCollection();
             this->getAllocator()->deallocate((void*) this->boolSections);
         }
@@ -148,6 +209,11 @@ public:
         this->deleteBoolSections = other.deleteBoolSections;
         this->setSize(other.getSize());
         this->setAllocator(other.getAllocator());
+
+        other.boolSections = nullptr;
+        other.deleteBoolSections = false;
+        other.setSize(0);
+        other.setAllocator(nullptr);
 
         return *this;
     }
@@ -160,15 +226,15 @@ public:
     }
 
     size_t getAllocatedSize() const override {
-        return this->boolSections->getAllocatedSize() * BITS_COUNT_IN_SECTION;
+        return this->boolSections->getAllocatedSize() * BoolSection::BITS_COUNT_IN_SECTION;
     }
     
     void resize(size_t size) override {
         if(size < this->getSize()){
             throw invalid_argument("Invalid size argument. It is less than size of the collection");
         }
-        size_t sectionsCount = size / BITS_COUNT_IN_SECTION;
-        if(size % BITS_COUNT_IN_SECTION != 0){
+        size_t sectionsCount = size / BoolSection::BITS_COUNT_IN_SECTION;
+        if(size % BoolSection::BITS_COUNT_IN_SECTION != 0){
             ++sectionsCount;
         }
         this->boolSections->resize(sectionsCount);
@@ -193,37 +259,27 @@ public:
         if(idx >= this->getSize()){
             throw out_of_range("Idx is out of range");
         }
-        IndexableCollection<BoolSection>& boolSections = *this->boolSections;
-        size_t sectionIdx = idx / BITS_COUNT_IN_SECTION;
-        size_t bitIdx = idx % BITS_COUNT_IN_SECTION;
-        return BoolReference((void*) &(boolSections[sectionIdx]), bitIdx);
+        size_t sectionIdx = idx / BoolSection::BITS_COUNT_IN_SECTION;
+        size_t bitIdx = idx % BoolSection::BITS_COUNT_IN_SECTION;
+        return (*this->boolSections)[sectionIdx].getReference(bitIdx);
     }
 
     const BoolReference operator[](size_t idx) const override {
         if(idx >= this->getSize()){
             throw out_of_range("Idx is out of range");
         }
-        IndexableCollection<BoolSection>& boolSections = *this->boolSections;
-        size_t sectionIdx = idx / BITS_COUNT_IN_SECTION;
-        size_t bitIdx = idx % BITS_COUNT_IN_SECTION;
-        return BoolReference((void*) &(boolSections[sectionIdx]), bitIdx);
+        size_t sectionIdx = idx / BoolSection::BITS_COUNT_IN_SECTION;
+        size_t bitIdx = idx % BoolSection::BITS_COUNT_IN_SECTION;
+        return (*this->boolSections)[sectionIdx].getReference(bitIdx);
     }
 
     bool replace(size_t idx, bool element) override {
         if(idx >= this->getSize()){
             throw out_of_range("Idx argument is out of range");
         }
-        IndexableCollection<BoolSection>& boolSections = *this->boolSections;
-        size_t sectionIdx = idx / 8;
-        size_t bitIdx = idx % 8;
-        BoolSection& section = boolSections[sectionIdx];
-        bool old = (section >> bitIdx) & 1;
-        if(element){
-            section |= 1 << bitIdx;
-        }else{
-            section &= ~(1 << bitIdx);
-        }
-        return old;
+        size_t sectionIdx = idx / BoolSection::BITS_COUNT_IN_SECTION;
+        size_t bitIdx = idx % BoolSection::BITS_COUNT_IN_SECTION;
+        return (*this->boolSections)[sectionIdx].setBit(bitIdx, element);
     }
 
     void insert(size_t idx, bool element) override {
@@ -233,37 +289,18 @@ public:
 
         IndexableCollection<BoolSection>& boolSections = *this->boolSections;
 
-        if(boolSections.getSize() * BITS_COUNT_IN_SECTION == this->getSize()){
+        if(boolSections.getSize() * BoolSection::BITS_COUNT_IN_SECTION == this->getSize()){
             boolSections.append(BoolSection(0));
         }
 
-        size_t sectionIdx = idx / BITS_COUNT_IN_SECTION;
-        size_t bitIdx = idx % BITS_COUNT_IN_SECTION;
-        BoolSection& section = boolSections[sectionIdx];
-
-        bool toMoveNextSection = section >> (BITS_COUNT_IN_SECTION - 1);
-        BoolSection bitsBefore = (ALL_EQUAL_ONE >> (BITS_COUNT_IN_SECTION - bitIdx)) & section;
-        BoolSection bitsAfter = ((ALL_EQUAL_ONE << bitIdx) & section) << 1;
-
-        section = 0 | bitsBefore | bitsAfter;
-        if(element){
-            section |= 1 << bitIdx;
-        }
-
-        size_t usedSections = this->getSize() / BITS_COUNT_IN_SECTION + 1;
+        size_t sectionIdx = idx / BoolSection::BITS_COUNT_IN_SECTION;
+        size_t bitIdx = idx % BoolSection::BITS_COUNT_IN_SECTION;
+        
+        bool leaved = boolSections[sectionIdx].insert(bitIdx, element);
+        size_t usedSections = this->getSize() / BoolSection::BITS_COUNT_IN_SECTION + 1;
         for(size_t i = sectionIdx + 1; i < usedSections; ++i){
-            section = boolSections[i];
-
-            bool tmp = section >> (BITS_COUNT_IN_SECTION - 1); 
-
-            section <<= 1;
-            if(toMoveNextSection){
-                section |= 1;
-            }
-
-            toMoveNextSection = tmp;
+            leaved = boolSections[i].insert(0, leaved);
         }
-
         this->setSize(this->getSize() + 1);
     }
 
@@ -274,50 +311,34 @@ public:
 
         IndexableCollection<BoolSection>& boolSections = *this->boolSections;
 
-        size_t sectionIdx = idx / BITS_COUNT_IN_SECTION;
-        size_t bitIdx = idx % BITS_COUNT_IN_SECTION;
+        size_t sectionIdx = idx / BoolSection::BITS_COUNT_IN_SECTION;
+        size_t bitIdx = idx % BoolSection::BITS_COUNT_IN_SECTION;
 
-        size_t usedSections = this->getSize() / BITS_COUNT_IN_SECTION;
-        if(this->getSize() % BITS_COUNT_IN_SECTION != 0){
+        size_t usedSections = this->getSize() / BoolSection::BITS_COUNT_IN_SECTION;
+        if(this->getSize() % BoolSection::BITS_COUNT_IN_SECTION != 0){
             ++usedSections;
         }
 
-        bool toMovePreviousSection = 0;
+        // doesn't matter, but false is best value
+        bool leaved = false;
         for(size_t i = usedSections - 1; i > sectionIdx; --i){
-            BoolSection& section = boolSections[i];
-            bool tmp = section & 1;
-            section >>= 1;
-            if(toMovePreviousSection){
-                section |= ~(ALL_EQUAL_ONE >> 1);
-            }
-            toMovePreviousSection = tmp;
+            boolSections[i].remove(0, leaved);
         }
-
-        BoolSection& section = boolSections[sectionIdx];
-
-        bool old = (section >> bitIdx) & 1;
-
-        BoolSection bitsBefore = (ALL_EQUAL_ONE >> (BITS_COUNT_IN_SECTION - bitIdx)) & section;
-        BoolSection bitsAfter = ((ALL_EQUAL_ONE << (bitIdx + 1)) & section) >> 1;
-        if(toMovePreviousSection){
-            bitsAfter |= ~(ALL_EQUAL_ONE >> 1);
-        }
-
-        section = 0 | bitsBefore | bitsAfter;
+        leaved = boolSections[sectionIdx].remove(bitIdx, leaved);
+        return leaved;
 
         this->setSize(this->getSize() - 1);
-
-        size_t freeSpaceInBits = (boolSections.getSize() * BITS_COUNT_IN_SECTION - this->getSize());
-        size_t sectionsToRemove = freeSpaceInBits / (BITS_COUNT_IN_SECTION);
-        for(size_t i = 0; i < sectionsToRemove; ++i){
-            boolSections.remove(boolSections.getSize() - 1);
+        if (this->getSize() % BoolSection::BITS_COUNT_IN_SECTION == 0){
+            size_t unusedSectionsCount = boolSections.getSize() - (this->getSize() / BoolSection::BITS_COUNT_IN_SECTION);
+            for(size_t i = 0; i < unusedSectionsCount; ++i){
+                boolSections.remove(boolSections.getSize() - 1);
+            }
         }
-
-        return old;
+        return leaved;
     }
 
     void clear() override {
-        this->setSize(0);
         this->boolSections->clear();
+        this->setSize(0);
     }
 };

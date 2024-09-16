@@ -140,7 +140,7 @@ public:
             return 0;
         }
 
-        size_t idx = bsearchLeftToInsert<size_t>(*(this->cols), to, start, stop);
+        size_t idx = bsearchRightToInsert<size_t>(*(this->cols), to, start, stop);
         if (idx == start) {
             return 0;
         }
@@ -164,7 +164,7 @@ public:
         size_t start = from != 0 ? rows[from - 1] : 0;
         size_t stop = rows[from];
 
-        size_t idx = bsearchLeftToInsert<size_t>(*(this->cols), to, start, stop);
+        size_t idx = bsearchRightToInsert<size_t>(*(this->cols), to, start, stop);
         if (idx != start && cols[idx - 1] == to) {
             return coefs.replace(idx - 1, coef);
         }
@@ -217,7 +217,7 @@ private:
 
     friend NeighboursIterator<TCoef> CSRAdjacencyMatrix<TCoef>::getNeighboursIterator(size_t, size_t, Allocator*);
     friend void CSRAdjacencyMatrix<TCoef>::replaceNeighboursIterator(size_t, size_t, NeighboursIterator<TCoef>&, Allocator*);
-    _CSRNeighboursIterator(CSRAdjacencyMatrix<TCoef>* matrix, size_t from, size_t to) : _ABCNeighboursIterator<TCoef>(false, matrix) {
+    _CSRNeighboursIterator(CSRAdjacencyMatrix<TCoef>* matrix, size_t from, size_t to) : _ABCNeighboursIterator<TCoef>(false, matrix), from(from) {
         IndexableCollection<size_t>& rows = *(matrix->getRows());
         IndexableCollection<size_t>& cols = *(matrix->getCols());
         size_t start = from != 0 ? rows[from - 1] : 0;

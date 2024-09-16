@@ -32,7 +32,7 @@ def create_matrix_for_drg(
     #
     # valid_reactions = np.where(st.net_rates_of_progress != 0) - Массив (вектор) индексов, в которых значения == true.
     # Те массив индексов реакций, скорость которых != 0. Такие реакции дальше называются валидными.
-    valid_reactions = np.where(st.net_rates_of_progress != 0)
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
 
     # product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions] - Двумерный массив (матрица)
     # стехиометрических коэффициентов продуктов, но только для валидных реакций.
@@ -120,7 +120,7 @@ def create_matrix_for_drgep(
 
     st.TPY = (temperature, pressure, mass_fractions)
 
-    valid_reactions = np.where(st.net_rates_of_progress != 0)
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
     reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
     stoich_coeffs = product_stoich_coeffs - reactant_stoich_coeffs
@@ -181,7 +181,7 @@ def create_matrix_for_pfa(
 
     st.TPX = (temperature, pressure, mass_fractions)
 
-    valid_reactions = np.where(st.net_rates_of_progress != 0)
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
     reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
     stoich_coeffs = product_stoich_coeffs - reactant_stoich_coeffs
@@ -222,13 +222,24 @@ def create_matrix_for_pfa(
     rab_pro_2 = np.dot(rab_pro_1, rab_pro_1)
     rab_con_2 = np.dot(rab_con_1, rab_con_1)
 
-    matrix = CSRAdjacencyMatrix(st.n_species)
+    try:
+        matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
 
     for specy_a in range(st.n_species):
         rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
 
-        matrix.add_row(rab, specy_a)
+        matrix[specy_a] = rab
 
-    matrix.finalize()
+        try:
+            matrix.add_row(rab, specy_a)
+        except Exception as error:
+            raise RuntimeError("Exception from c++ layer") from error
+
+    try:
+        matrix.finalize()
+    except Exception as error:
+        raise RuntimeError("Exception from c++ layer") from error
 
     return matrix

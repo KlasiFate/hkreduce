@@ -42,3 +42,4 @@ __pycache__
 /dist
 /build
 /hkreduce.egg-info
+*.env

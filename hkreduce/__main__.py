@@ -1,6 +1,7 @@
+import multiprocessing
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import cantera as ct  # type: ignore[import-untyped]
 import click
@@ -53,11 +54,11 @@ def read_reducing_task_config(config: Config) -> ReducingTaskConfig:
         suberror = error.errors(include_context=False, include_input=True)[0]
         raise ValueError(suberror["msg"]) from error
 
-    cantera_datafiles = cast(list[Path], ct.list_data_files())
+    cantera_datafiles = [Path(path) for path in ct.list_data_files()]
     if any(str(task.model) == datafile.name for datafile in cantera_datafiles):
         return task
     if not os.path.isabs(task.model):
-        task.model = config.input / task.model
+        task.model = config.input.parent / task.model
     return task
 
 
@@ -67,19 +68,18 @@ def run(model: Solution, config: Config, reducing_task_config: ReducingTaskConfi
         reducing_task_config=reducing_task_config,
         num_threads=config.num_threads,
         output_model_path=config.output,
-        debug=config.debug,
     ).run()
 
 
 @click.command()
-@click.argument(
-    "input",
+@click.option(
+    "--input",
     required=True,
     type=str,
     help="Path to an yaml file that describes reducing task",
 )
-@click.argument(
-    "output",
+@click.option(
+    "--output",
     required=False,
     type=str,
     help="Path to an yaml file that describes reducing task",
@@ -94,11 +94,12 @@ Default: n - 1 if system is mutlicores else 1",
 @click.option(
     "--debug",
     required=False,
-    type=bool,
+    is_flag=True,
     default=False,
     help="Enable debug mode that make logs more verbose",
 )
 def main(input: str, output: str | None, num_threads: int | None, debug: bool) -> None:  # noqa: A002,FBT001
+    multiprocessing.set_start_method(method="spawn")
     setup_config(debug=debug)
     logger = get_logger()
     try:
@@ -108,15 +109,18 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         logger.error(
             f"Error while reading creating config or reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
         )
+        logger.complete()
         return
     except Exception:  # noqa: BLE001
         logger.opt(exception=True).critical("Uncaught error")
+        logger.complete()
         return
 
     try:
         model = Solution(reducing_task_config.model)
     except ct.CanteraError as error:
         logger.error(f"Problems while loading model.\n{error.args[0]}")  # noqa: G004
+        logger.complete()
         return
 
     try:
@@ -124,6 +128,7 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         reducing_task_config.check_all_species_exist(species)
     except ValueError as error:
         logger.error(error.args[0])
+        logger.complete()
         return
 
     try:
@@ -134,3 +139,9 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
     except Exception:  # noqa: BLE001
         logger.opt(exception=True).critical("Uncaught error")
         return
+    finally:
+        logger.complete()
+
+
+if __name__ == "__main__":
+    main()

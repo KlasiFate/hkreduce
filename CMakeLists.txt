@@ -6,14 +6,8 @@ project("hkreduce")
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake-modules ${CMAKE_MODULE_PATH})
 
 
-set(CMAKE_C_COMPILER "clang")
-set(CMAKE_CXX_COMPILER "clang")
-
-
-# XXX: Имя переменной зарезервировано
-if(NOT DEFINED LIBRARY_OUTPUT_NAME)
-    message(FATAL_ERROR "Name of output library is not provided")
-endif()
+set(CMAKE_C_COMPILER "g++")
+set(CMAKE_CXX_COMPILER "g++")
 
 
 set(OUTPUT_DIR ${PROJECT_SOURCE_DIR}/output)
@@ -34,10 +28,27 @@ file(GLOB_RECURSE SRCS ${PROJECT_SOURCE_DIR}/hkreduce/*.cpp)
 
 add_library(hkreduce_cpp_interface SHARED ${SRCS})
 
+# XXX: Имя переменной зарезервировано
+if(NOT DEFINED LIBRARY_OUTPUT_NAME)
+    message(WRANING "Name of output library is not provided")
+    set(LIBRARY_OUTPUT_NAME "cpp_interface")
+endif()
+
 if(MSVC)
-    target_compile_options(hkreduce_cpp_interface PUBLIC /W4 /std:c++11)
+    target_compile_options(hkreduce_cpp_interface PUBLIC /W4)
 else()
-    target_compile_options(hkreduce_cpp_interface PUBLIC -Wall -Wextra -Wpedantic -std=c++11)
+    target_compile_options(hkreduce_cpp_interface PUBLIC -Wall -Wextra -Wpedantic -lstdc++)
+endif()
+target_compile_features(hkreduce_cpp_interface PUBLIC cxx_std_11)
+
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+    if(MSVC)
+        target_compile_options(hkreduce_cpp_interface PUBLIC /fsanitize=address /fsanitize=memory /fsanitize=null /fsanitize-address-use-after-scope /fno-omit-frame-pointer /fno-optimize-sibling-calls /O0)
+        target_link_options(hkreduce_cpp_interface PUBLIC /fsanitize=address /fsanitize=null /fsanitize-address-use-after-scope /fsanitize=leak)
+    else()
+        target_compile_options(hkreduce_cpp_interface PUBLIC -fsanitize=address -fsanitize=null -fsanitize-address-use-after-scope -fno-omit-frame-pointer -fno-optimize-sibling-calls -O0)
+        target_link_options(hkreduce_cpp_interface PUBLIC -fsanitize=address -fsanitize=null -fsanitize-address-use-after-scope -fsanitize=leak)
+    endif()
 endif()
 
 target_include_directories(hkreduce_cpp_interface PUBLIC ${PROJECT_SOURCE_DIR}/cpp/include)

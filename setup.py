@@ -48,6 +48,7 @@ class CMakeBuilder(build_ext):
         for ext in self.extensions:
             extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext_name=ext.name)))
             cfg = "Debug" if self.debug == "ON" else "Release"
+            # cfg = "Debug"
 
             ext_filename = cast(str, self.get_ext_filename(self.get_ext_fullname(ext_name=ext.name))).split("/")[-1]
             library_output_name = ".".join(ext_filename.split("/")[-1].split(".")[:-1:])

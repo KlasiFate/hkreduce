@@ -12,6 +12,7 @@ using namespace std;
 template <class TCoef>
 class DRG{
 private:
+
     void removeEdges(ABCAdjacencyMatrix<TCoef>& matrix, TCoef threshold, Allocator* allocator) const {
         NeighboursIterator<TCoef> iterator;
         for(size_t from = 0; from < matrix.getSize(); ++from){
@@ -33,17 +34,19 @@ private:
         size_t innerIteratorSize;
 
     public:
+        // + 10 is necessary for copy\move assignment
         AllocatorForInnerIterators(Allocator* allocator, size_t maxStackSize): 
             originalAllocator(allocator),
             space(nullptr),
-            freeSpaceBitmap(maxStackSize, true, allocator),
-            maxStackSize(maxStackSize)
+            freeSpaceBitmap(maxStackSize + 10, true, allocator),
+            maxStackSize(maxStackSize + 10),
+            innerIteratorSize(0)
             {}
 
         void* allocate(size_t innerIteratorSize) override {
             if(this->space == nullptr){
-                this->space = (char*) this->originalAllocator->allocate(innerIteratorSize * this->maxStackSize);
                 this->innerIteratorSize = innerIteratorSize;
+                this->space = (char*) this->originalAllocator->allocate(this->innerIteratorSize * this->maxStackSize);
             }else if(this->innerIteratorSize != innerIteratorSize){
                 return this->originalAllocator->allocate(innerIteratorSize);
             }
@@ -52,7 +55,7 @@ private:
                 BoolReference value = this->freeSpaceBitmap[idx];
                 if(value){
                     value = false;
-                    return (void*) (this->space + (idx * innerIteratorSize));
+                    return (void*) (this->space + (idx * this->innerIteratorSize));
                 }
             }
             return this->originalAllocator->allocate(innerIteratorSize);
@@ -74,14 +77,16 @@ private:
         }
     };
 
-    void checkAchievables(ABCAdjacencyMatrix<TCoef>& matrix, size_t source, Bitmap& achievables, Allocator* allocator) const {
-        using Pair = pair<size_t, NeighboursIterator<TCoef>>;
-        Pair* stackArray = (Pair*) allocator->allocate(sizeof(Pair) * matrix.getSize());
-        ArrayCollection<Pair> stack(stackArray, matrix.getSize(), 0, true, allocator);
+    using Pair = pair<size_t, NeighboursIterator<TCoef>>;
 
-        AllocatorForInnerIterators allocatorForInnerIterators(allocator, matrix.getSize());
-        
-        stack.append(Pair(source, matrix.getNeighboursIterator(source, 0, &allocatorForInnerIterators)));
+    void checkAchievables(
+        ABCAdjacencyMatrix<TCoef>& matrix,
+        size_t source,
+        Bitmap& achievables,
+        ArrayCollection<Pair>& stack,
+        AllocatorForInnerIterators* allocatorForInnerIterators
+    ) const {
+        stack.append(Pair(source, matrix.getNeighboursIterator(source, 0, allocatorForInnerIterators)));
         achievables[source] = true;
 
         while (stack.getSize() > 0) {
@@ -90,11 +95,12 @@ private:
             bool added = false;
             for (NeighboursIterator<TCoef>& iterator = pair.second; !iterator.getStopped(); ++iterator) {
                 size_t neighbour = iterator.getTo();
-                if (achievables[neighbour]) {
+                BoolReference isAchievable = achievables[neighbour];
+                if (isAchievable) {
                     continue;
                 }
-                achievables[neighbour] = true;
-                stack.append(Pair(neighbour, matrix.getNeighboursIterator(neighbour, 0, &allocatorForInnerIterators)));
+                isAchievable = true;
+                stack.append(Pair(neighbour, matrix.getNeighboursIterator(neighbour, 0, allocatorForInnerIterators)));
                 added = true;
                 break;
             }
@@ -115,6 +121,10 @@ public:
 
         Bitmap achievables(matrix.getSize(), false);
 
+        AllocatorForInnerIterators allocatorForInnerIterators(allocator, matrix.getSize());
+        
+        ArrayCollection<Pair> stack(matrix.getSize(), allocator);
+
         for (size_t i = 0; i < sources.getSize(); ++i) {
             size_t source = sources[i];
             if (source > matrix.getSize()) {
@@ -123,7 +133,7 @@ public:
             if (achievables[source]) {
                 continue;
             }
-            this->checkAchievables(matrix, source, achievables, allocator);
+            this->checkAchievables(matrix, source, achievables, stack, &allocatorForInnerIterators);
         }
         return achievables;
     };

@@ -17,19 +17,7 @@ protected:
             return this->array + idx;
         }
 
-        // void constructAt(size_t idx, const T& value){
-        //     new (this->array + idx) T(value);
-        //     this->setSize(++this->getSize());
-        //     ++this->initalizedElements;
-        // }
-
-        // void constructAt(size_t idx, T&& value){
-        //     new (this->array + idx) T(value);
-        //     this->setSize(++this->getSize());
-        //     ++this->initalizedElements;
-        // }
-
-        Section(size_t sectionSize, Allocator* allocator) : ArrayCollection<T>((T*) allocator->allocate(sizeof(T)* sectionSize), sectionSize, 0, true, allocator) { }
+        Section(size_t sectionSize, Allocator* allocator) : ArrayCollection<T>(sectionSize, allocator) { }
     };
 
     typedef DArrayCollection<Section> Sections;
@@ -43,10 +31,7 @@ protected:
         size_t allocatedSizeOfArray = (sectionsCount / 1024 + (sectionsCount % 1024 == 0 ? 0 : 1)) * 1024;
 
         this->sections = Sections(
-            (Section*) allocator->allocate(sizeof(Section) * allocatedSizeOfArray),
             allocatedSizeOfArray,
-            0,
-            true,
             allocator,
             1024
         );
@@ -233,6 +218,7 @@ public:
                 this->sections[i].clear();
             }
         }
+        this->setSize(0);
         this->truncate();
     }
 };

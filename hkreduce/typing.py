@@ -12,3 +12,8 @@ class ReducingMethod(str, Enum):
 
 
 LoggingConfig: TypeAlias = dict[str, Any]
+
+
+class AmountDefinitionType(str, Enum):
+    MOLES_FRACTIONS = "MOLES_FRACTIONS"
+    KILOGRAMS_FRACTIONS = "KILOGRAMS_FRACTIONS"

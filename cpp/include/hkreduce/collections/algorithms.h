@@ -11,7 +11,7 @@ using namespace std;
 
 
 template<class T, class TCollection = IndexableCollection<T>>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const TCollection& collection,
     const T& element,
     function<bool(const T&, const T&)> compare,
@@ -47,13 +47,13 @@ size_t bsearchLeftToInsert(
 };
 
 template<class T, class TCollection = IndexableCollection<T>>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const TCollection& collection,
     const T& element,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeftToInsert<T, TCollection>(
+    return bsearchRightToInsert<T, TCollection>(
         collection,
         element,
         [] (const T& middleElement, const T& element) {return middleElement <= element;},
@@ -64,52 +64,52 @@ size_t bsearchLeftToInsert(
 
 
 template<class T>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const ArrayCollection<T>& collection,
     const T& element,
     function<bool(const T&, const T&)> compare,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeftToInsert<T, ArrayCollection<T>>(collection, element, compare, start, stop);
+    return bsearchRightToInsert<T, ArrayCollection<T>>(collection, element, compare, start, stop);
 };
 
 
 template<class T>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const ArrayCollection<T>& collection,
     const T& element,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeftToInsert<T, ArrayCollection<T>>(collection, element, start, stop);
+    return bsearchRightToInsert<T, ArrayCollection<T>>(collection, element, start, stop);
 };
 
 template<class T>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const SectionedCollection<T>& collection,
     const T& element,
     function<bool(const T&, const T&)> compare,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeftToInsert<T, SectionedCollection<T>>(collection, element, compare, start, stop);
+    return bsearchRightToInsert<T, SectionedCollection<T>>(collection, element, compare, start, stop);
 };
 
 
 template<class T>
-size_t bsearchLeftToInsert(
+size_t bsearchRightToInsert(
     const SectionedCollection<T>& collection,
     const T& element,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeftToInsert<T, SectionedCollection<T>>(collection, element, start, stop);
+    return bsearchRightToInsert<T, SectionedCollection<T>>(collection, element, start, stop);
 };
 
 
 template<class T, class TCollection = IndexableCollection<T>>
-size_t bsearchLeft(
+size_t bsearchRight(
     const TCollection& collection,
     const T& element,
     function<int(const T&, const T&)> compare,
@@ -117,10 +117,10 @@ size_t bsearchLeft(
     size_t stop = SIZE_MAX
 ) {
     function<bool(const T&, const T&)> compare2 = [&compare] (const T& middleElement, const T& element) -> int {
-        return compare(middleElement, element) <= 0;
+        return 0 <= compare(middleElement, element);
         };
 
-    size_t idxToInsert = bsearchLeftToInsert<T, TCollection>(collection, element, compare2, start, stop);
+    size_t idxToInsert = bsearchRightToInsert<T, TCollection>(collection, element, compare2, start, stop);
 
     // not found
     if (idxToInsert == 0) {
@@ -134,7 +134,7 @@ size_t bsearchLeft(
 
 
 template<class T, class TCollection = IndexableCollection<T>>
-size_t bsearchLeft(
+size_t bsearchRight(
     const TCollection& collection,
     const T& element,
     size_t start = 0,
@@ -143,7 +143,7 @@ size_t bsearchLeft(
     function<int(const T&, const T&)> compare = [] (const T& first, const T& second) -> int {
         return first == second ? 0 : (first < second ? -1 : 1);
         };
-    return bsearchLeft<T, TCollection>(
+    return bsearchRight<T, TCollection>(
         collection,
         element,
         compare,
@@ -154,47 +154,47 @@ size_t bsearchLeft(
 
 
 template<class T>
-size_t bsearchLeft(
+size_t bsearchRight(
     const ArrayCollection<T>& collection,
     const T& element,
     function<int(const T&, const T&)> compare,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeft<T, ArrayCollection<T>>(collection, element, compare, start, stop);
+    return bsearchRight<T, ArrayCollection<T>>(collection, element, compare, start, stop);
 };
 
 
 template<class T>
-size_t bsearchLeft(
+size_t bsearchRight(
     const SectionedCollection<T>& collection,
     const T& element,
     function<int(const T&, const T&)> compare,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeft<T, SectionedCollection<T>>(collection, element, compare, start, stop);
+    return bsearchRight<T, SectionedCollection<T>>(collection, element, compare, start, stop);
 };
 
 template<class T>
-size_t bsearchLeft(
+size_t bsearchRight(
     const ArrayCollection<T>& collection,
     const T& element,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeft<T, ArrayCollection<T>>(collection, element, start, stop);
+    return bsearchRight<T, ArrayCollection<T>>(collection, element, start, stop);
 };
 
 
 template<class T>
-size_t bsearchLeft(
+size_t bsearchRight(
     const SectionedCollection<T>& collection,
     const T& element,
     size_t start = 0,
     size_t stop = SIZE_MAX
 ) {
-    return bsearchLeft<T, SectionedCollection<T>>(collection, element, start, stop);
+    return bsearchRight<T, SectionedCollection<T>>(collection, element, start, stop);
 };
 
 
@@ -219,19 +219,14 @@ size_t countBits(
 ) {
     size_t result = 0;
 
-    size_t sectionsCount = collection.getSize() / Bitmap::BITS_COUNT_IN_SECTION;
+    size_t fullFilledSectionsCount = collection.getSize() / Bitmap::BoolSection::BITS_COUNT_IN_SECTION;
     const IndexableCollection<Bitmap::BoolSection>* sections = collection.getBoolSections();
-    for (size_t i = 0; i < sectionsCount; ++i) {
+    for (size_t i = 0; i < fullFilledSectionsCount; ++i) {
         Bitmap::BoolSection section = (*sections)[i];
-
-        for (size_t j = 0; j < Bitmap::BITS_COUNT_IN_SECTION; ++j) {
-            if (section & (1 << j)) {
-                ++result;
-            }
-        }
+        result += section.countBits();
     }
 
-    for (size_t i = sectionsCount * Bitmap::BITS_COUNT_IN_SECTION; i < collection.getSize(); ++i) {
+    for (size_t i = fullFilledSectionsCount * Bitmap::BoolSection::BITS_COUNT_IN_SECTION; i < collection.getSize(); ++i) {
         if (collection[i]) {
             ++result;
         }

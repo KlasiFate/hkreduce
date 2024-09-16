@@ -3,19 +3,28 @@ from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
-from .typing import ReducingMethod
+from .typing import AmountDefinitionType, ReducingMethod
 
 
 class BaseModel(PydanticBaseModel, validate_assignment=True):
     pass
 
 
+def alias_generator(field_name: str) -> str:
+    if field_name.startswith('_'):
+        return field_name
+    return field_name.replace("_", "-")
+
+
 class AutoignitionConditionConfig(BaseModel):
+    model_config = ConfigDict(alias_generator=alias_generator)
+
     kind: Literal["CONSTANT_VOLUME", "CONSTANT_PRESSURE"]
     pressure: float
     temperature: float
+    amount_definition_type: AmountDefinitionType = AmountDefinitionType.MOLES_FRACTIONS
     reactants: dict[str, float]
 
     max_steps: int = Field(default=10 * 1000, gt=0)
@@ -24,8 +33,8 @@ class AutoignitionConditionConfig(BaseModel):
     residual_threshold_coef: float = Field(default=10.0, gt=0.0)
     steps_sample_size: int = Field(default=20, gt=0)
 
-    @model_validator(mode='after')
-    def validate_reactants(self) -> 'AutoignitionConditionConfig':
+    @model_validator(mode="after")
+    def validate_reactants(self) -> "AutoignitionConditionConfig":
         for reactant, mass in self.reactants.items():
             if mass < 0:
                 raise ValueError(f"Mass of reactant `{reactant}` is less than zero")
@@ -36,7 +45,10 @@ class AutoignitionConditionConfig(BaseModel):
             if reactant not in species:
                 raise ValueError(f"No such reactant `{reactant}` in model for {ai_cond_idx} case")
 
+
 class ReducingTaskConfig(BaseModel):
+    model_config = ConfigDict(alias_generator=alias_generator)
+
     model: Path
     phase_name: str | None = None
     target_species: list[str]
@@ -53,16 +65,29 @@ class ReducingTaskConfig(BaseModel):
     initial_threshold_auto_retrieving_multiplier: float = Field(default=0.01, gt=0)
     initial_threshold_auto_retrieving_attempts: int = Field(default=3, gt=1)
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def checkinitial_threshold_set_by_user(cls, data: Any) -> Any:
-        if isinstance(data, dict) and 'initial_threshold' in data:
-            data['_initial_threshold_set_by_user'] = True
+        if isinstance(data, dict) and "initial-threshold" in data:
+            data["_initial_threshold_set_by_user"] = True
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def recalc_max_error(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "max-error" in data:
+            try:
+                max_error = int(data["max-error"])
+                data["max-error"] = max_error / 100
+            except (ValueError, TypeError):
+                # it will validated by pydantic
+                pass
         return data
 
     def check_all_species_exist(self, species: set[str]) -> None:
         for specy in self.target_species + self.retained_species:
-            raise ValueError(f"No such specy `{specy}` in model")
+            if specy not in species:
+                raise ValueError(f"No such specy `{specy}` in model")
         for i, ai_cond in enumerate(self.autoignition_conditions):
             ai_cond.check_all_reactants_exist(species, i)
 

@@ -10,6 +10,7 @@ from typing import Any, BinaryIO, Literal, cast
 import numpy as np
 from numpy.typing import NDArray
 
+from .logging import get_logger
 from .typing import PathLike
 
 
@@ -39,25 +40,23 @@ class NumpyArrayDumper:
         self.close()
 
     def open(self, mode: Literal["r", "w", "w+"] = "w+") -> "NumpyArrayDumper":
-        if self.filepath:
-            raise ValueError("It has already been opened")
+        mode_casted = cast(Literal["rb", "wb", "w+b"], mode + "b")
         if self._file:
             raise ValueError("Is is already opened")
 
-        mode_casted = cast(Literal["rb", "wb", "w+b"], mode + "b")
+        if not self.filepath:
+            if not self.dirpath:
+                self.dirpath = mkdtemp(prefix="hkreduce_")
+                self.dir_is_tmp = True
+            self.dirpath = Path(self.dirpath)
 
-        if not self.dirpath:
-            self.dirpath = mkdtemp(prefix="hkreduce_")
-            self.dir_is_tmp = True
-        self.dirpath = Path(self.dirpath)
+            if not self.filename:
+                self.filepath = create_unique_file(prefix="hkreduce_", suffix=".npy", dir=self.dirpath)
+                self.filename = self.filepath.name
+            else:
+                self.filepath = self.dirpath / self.filename
 
-        if not self.filename:
-            self.filepath = create_unique_file(prefix="hkreduce_", suffix=".npy", dir=self.dirpath)
-            self.filename = self.filepath.name
-        else:
-            self.filepath = self.dirpath / self.filename
-
-        self._file = open(self.filepath, mode=mode_casted) # noqa: SIM115
+        self._file = open(self.filepath, mode=mode_casted)  # noqa: SIM115
 
         return self
 
@@ -102,36 +101,52 @@ class NumpyArrayDumper:
         )
 
 
+DEFAULT_TIMEOUT_TO_JOIN: float = 5.0
+
+
 class WorkersCloser:
     def __init__(self, workers: list[tuple[Process, Connection]]) -> None:
         self.workers = workers
 
     def open(self) -> None:
+        logger = get_logger()
         started_processes: list[Process] = []
         try:
-            for proccess, conn in self.workers:
-                proccess.start()
-                started_processes.append(proccess)
+            for process, conn in self.workers:
+                logger.debug(f"Starting process `{process.name}`")
+                process.start()
+                logger.debug(f"Process `{process.name}` started")
+                started_processes.append(process)
+                logger.debug(f"Wait of initialization of process `{process.name}`")
                 message, __ = cast(tuple[Enum, tuple[Any, ...]], conn.recv())
                 if message.name.lower() != "initialized":
                     raise RuntimeError("Error in worker. It is not initialized")
+                logger.debug(f"Process `{process.name}` initialized")
         except:
             for process in started_processes:
                 if process.is_alive():
-                    proccess.terminate()
+                    process.terminate()
             for process in started_processes:
                 if process.is_alive():
-                    proccess.join()
+                    process.join()
             raise
 
     def close(self) -> None:
+        logger = get_logger()
         for worker_process, __ in self.workers:
             if worker_process.is_alive():
-                worker_process.terminate()
+                logger.debug(f"Wait finishing of process `{worker_process.name}`")
+                worker_process.join(DEFAULT_TIMEOUT_TO_JOIN)
+                if worker_process.is_alive():
+                    logger.debug(f"Terminating `{worker_process.name}` because timeout of join is exceed")
+                    worker_process.terminate()
 
         for worker_process, __ in self.workers:
             if worker_process.is_alive():
-                worker_process.join()
+                logger.debug(f"Joining after termination of process `{worker_process.name}`")
+                worker_process.join(DEFAULT_TIMEOUT_TO_JOIN)
+                if worker_process.is_alive():
+                    logger.debug(f"Timeout of joining after termination of process `{worker_process.name}` is exceed")
 
     def __enter__(self) -> "WorkersCloser":
         self.open()

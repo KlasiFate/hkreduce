@@ -1,0 +1,20 @@
+model: ./test_models/CRECK_2003_TOT_HT_LT_ME/data.yaml
+target-species:
+  - O2
+  - C2H6
+  - C3H8
+retained-species:
+  - O2
+  - C2H6
+  - C3H8
+  - N2
+method: DRGEP
+max-error: 1.0
+autoignition-conditions:
+  - kind: CONSTANT_VOLUME
+    pressure: 1.0
+    temperature: 1200.0
+    reactants:
+      C3H8: 1.0
+      O2: 6.0
+      N2: 22.56

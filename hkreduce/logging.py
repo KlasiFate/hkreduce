@@ -17,7 +17,11 @@ def get_config(*, debug: bool = False) -> LoggingConfig:
     if debug:
         level = "DEBUG"
 
-    return {"handlers": {"sink": sys.stdout, "format": format, "colorize": True, "diagnostic": debug, "level": level}}
+    return {
+        "handlers": [
+            {"sink": sys.stdout, "format": format, "colorize": True, "diagnose": debug, "level": level, "enqueue":True}
+        ]
+    }
 
 
 _debug: bool = False
@@ -25,6 +29,7 @@ _config_setup: bool = False
 
 
 def setup_config(config: LoggingConfig | None = None, *, debug: bool = False) -> None:
+    logger.remove() # sys.stderr is not picklable
     global _debug, _config_setup
     _debug = debug
     if config is None:
