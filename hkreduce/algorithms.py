@@ -230,8 +230,6 @@ def create_matrix_for_pfa(
     for specy_a in range(st.n_species):
         rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
 
-        matrix[specy_a] = rab
-
         try:
             matrix.add_row(rab, specy_a)
         except Exception as error:
