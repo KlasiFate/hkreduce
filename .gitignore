@@ -37,7 +37,7 @@
 __pycache__
 /.venv
 /poetry.lock
-/output
+/output*
 /test*
 /dist
 /build

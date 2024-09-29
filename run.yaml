@@ -8,13 +8,14 @@ retained-species:
   - C2H6
   - C3H8
   - N2
-method: DRGEP
-max-error: 1.0
+method: DRG
+max-error: 5
 autoignition-conditions:
   - kind: CONSTANT_VOLUME
     pressure: 1.0
     temperature: 1200.0
     reactants:
-      C3H8: 1.0
-      O2: 6.0
-      N2: 22.56
+      C3H8: 0.050477
+      O2: 0.224853
+      N2: 0.724670
+    amount_definition_type: KILOGRAMS_FRACTIONS

@@ -77,7 +77,7 @@ class ReducingTaskConfig(BaseModel):
     def recalc_max_error(cls, data: Any) -> Any:
         if isinstance(data, dict) and "max-error" in data:
             try:
-                max_error = int(data["max-error"])
+                max_error = float(data["max-error"])
                 data["max-error"] = max_error / 100
             except (ValueError, TypeError):
                 # it will validated by pydantic
