@@ -18,4 +18,4 @@ autoignition-conditions:
       C3H8: 0.050477
       O2: 0.224853
       N2: 0.724670
-    amount_definition_type: KILOGRAMS_FRACTIONS
+    amount_definition_type: MASS_FRACTIONS
