@@ -5,8 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, Field, model_validator
 
-from ..setup import PathLike
-from .typing import AmountDefinitionType, ReducingMethod
+from .typing import AmountDefinitionType, PathLike, ReducingMethod
 
 
 class BaseModel(PydanticBaseModel, validate_assignment=True):

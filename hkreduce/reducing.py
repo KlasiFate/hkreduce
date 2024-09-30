@@ -4,7 +4,7 @@ from multiprocessing.synchronize import BoundedSemaphore
 from typing import Any, cast
 
 import numpy as np
-from cantera import Solution
+from cantera import Solution  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 
 from .algorithms import create_matrix_for_drg, create_matrix_for_drgep, create_matrix_for_pfa
@@ -63,11 +63,11 @@ class Reducer(Worker):
             self.ai_condition_idx, self.state_idx, str(threshold).replace(".", "__")
         )
         filepath = create_unique_file(
-            dir=self.tmp_dir,
+            dir=self.config.tmp_dir,
             prefix=prefix,
             suffix=".npy",
         )
-        with NumpyArrayDumper(self.tmp_dir, filepath.name).open("w") as retained_species_saver:
+        with NumpyArrayDumper(self.config.tmp_dir, filepath.name).open("w") as retained_species_saver:
             retained_species_saver.write_data(retained_species)
         return retained_species_saver
 
@@ -124,18 +124,20 @@ class ReducersManager(WorkersManager):
 
         self._sem = multiprocessing.BoundedSemaphore(config.num_threads)
 
-        super().__init__(self._create_reducers())
+        super().__init__(self._create_reducers()) # type: ignore[arg-type]
 
         self._matrixes_created = False
 
-        model = load_model(self.model_path)
+        model = load_model(self.config.reducing_task_config.model)
         self.retained_species = set(get_species_indexes(config.reducing_task_config.retained_species, model=model))
+
+        self.logger = get_logger()
 
     def _create_state_saver(self, ai_cond_idx: int, state_idx: int, state: NDArray[np.float64]) -> NumpyArrayDumper:
         state_saver = NumpyArrayDumper(
-            dir=self.tmp_dir,
+            dir=self.config.tmp_dir,
             filename=create_unique_file(
-                dir=self.tmp_dir,
+                dir=self.config.tmp_dir,
                 prefix=f"state_for_{ai_cond_idx}_ai_condition_and_{state_idx}_state_",
                 suffix=".npy",
             ).name,
@@ -165,10 +167,10 @@ class ReducersManager(WorkersManager):
 
     def open(self) -> None:
         self.logger.info("Creating matrixes")
-        super().open()
+        return super().open()
 
     def __enter__(self) -> "ReducersManager":
-        super().__enter__()
+        return cast(ReducersManager, super().__enter__())
 
     def reduce(self, threshold: float) -> set[int]:
         if not self._matrixes_created:

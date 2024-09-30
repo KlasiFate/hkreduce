@@ -10,11 +10,11 @@ import yaml.error
 from cantera import Solution
 from pydantic import ValidationError
 
-from ..setup import PathLike
 from .config import Config, ReducingTaskConfig
 from .errors import BaseError
 from .logging import get_logger, setup_config
 from .main import Main
+from .typing import PathLike
 from .utils import TemporaryDirectory
 
 
@@ -46,6 +46,9 @@ def create_config(
 
 
 def read_reducing_task_config(input: PathLike) -> ReducingTaskConfig:  # noqa: A002
+    if isinstance(input, str):
+        input = Path(input) # noqa: A001
+
     default_msg = f"Wrong format of yaml file `{input}`."
     try:
         with open(input, "rt") as file:
@@ -76,10 +79,7 @@ def read_reducing_task_config(input: PathLike) -> ReducingTaskConfig:  # noqa: A
 
 
 def run(model: Solution, config: Config) -> None:
-    Main(
-        model=model,
-        config=config
-    ).run()
+    Main(model=model, config=config).run()
 
 
 @click.command()

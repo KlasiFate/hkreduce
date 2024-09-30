@@ -180,7 +180,7 @@ class Simulation(Worker):
         temperature_delta = temperature_diff / ai_condition.steps_sample_size
 
         filename = create_unique_file(
-            self.tmp_dir, prefix=f"steps_sample_of_{self.ai_condition_idx}_ai_case_", suffix=".npy"
+            self.config.tmp_dir, prefix=f"steps_sample_of_{self.ai_condition_idx}_ai_case_", suffix=".npy"
         ).name
 
         i = 0
@@ -251,7 +251,7 @@ class SimulationManager(WorkersManager):
 
         self.logger = get_logger()
 
-        super().__init__(self._create_simulations())
+        super().__init__(self._create_simulations()) # type: ignore[arg-type]
 
     def _create_simulations(self) -> list[Simulation]:
         simulations: list[Simulation] = []

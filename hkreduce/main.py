@@ -66,7 +66,7 @@ reactions at `{model_path}` gives: {error}",
                 model_path=model_path,
                 error=error * 100,
             )
-            if error < self.reducing_task_config.max_error:
+            if error < self.config.reducing_task_config.max_error:
                 return threshold, model_path, retained_species, reactions_count, error
 
         raise AutoretrievingInitialThresholdError("Auto retrieving initial threshold failed because no threshold")
@@ -149,7 +149,7 @@ reactions at `{model_path}` gives: {error}",
         ).run()
         logger.info("Samples is got")
 
-        with ReducersManager(samples_savers=samples_savers) as reducers_manager:
+        with ReducersManager(config=self.config, samples_savers=samples_savers) as reducers_manager:
             initial_threshold = self.config.reducing_task_config.initial_threshold
 
             if not self.config.reducing_task_config._initial_threshold_set_by_user:  # noqa: SLF001
@@ -226,7 +226,7 @@ reactions at `{model_path}` gives: {error}",
 
                 logger.info("Calculating error")
                 error = self._calc_error(model_path, original_ignition_delays)
-                if error > self.reducing_task_config.max_error:
+                if error > self.config.reducing_task_config.max_error:
                     logger.info(
                         "Reduced model with {retained_species_count} species and {retained_reactions_count} \
 reactions at `{model_path}` gives too large error: {error}",
@@ -260,9 +260,9 @@ at `{model_path}` as result",
             )
             logger.info("Copying model to output path")
             try:
-                shutil.copyfile(model_path, self.output_model_path)
+                shutil.copyfile(model_path, self.config.output)
             except Exception as error:
-                raise RuntimeError(f"Failed to copy result reduced model to {self.output_model_path}") from error
+                raise RuntimeError(f"Failed to copy result reduced model to {self.config.output}") from error
 
             stop = time.time()
             logger.info(

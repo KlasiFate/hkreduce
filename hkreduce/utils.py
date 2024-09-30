@@ -154,7 +154,7 @@ class Shifter(threading.Thread):
                     to_remove.append(conn)
                     continue
 
-                queue = self._conns.get(conn)[0]
+                queue = conns[conn][0]
                 while conn.poll(0):
                     queue.put(conn.recv())
 
@@ -212,7 +212,7 @@ class Worker(ABC, multiprocessing.Process):
 
     def __init__(
         self,
-        name: str = None,
+        name: str | None = None,
         *,
         daemon: bool = True,
     ) -> None:
@@ -307,7 +307,7 @@ Most likely it done job."
             with self._shifter_install_lock:
                 if not self._shifter:
                     self.__class__._shifter = Shifter()  # noqa: SLF001
-        self._shifter.add(
+        self._shifter.add( # type: ignore[union-attr]
             self._conns_pair.parent_conn, self._parent_queue, closed_event=self._conns_pair_closed_by_worker
         )
 
@@ -331,7 +331,7 @@ Most likely it done job."
         try:
             self._conns_pair.worker_conn.send(Message("started", None))
             result: Any = None
-            self._run()
+            self._target()
             self._conns_pair.worker_conn.send(Message("success", result))
         except BaseException:
             self._conns_pair.worker_conn.send(Message("failed", None))
@@ -343,7 +343,7 @@ Most likely it done job."
         super().close()
         if self._shifter:
             # Shifter should remove conn and queue but just in case
-            self._shifter.remove(self._parent_conn)
+            self._shifter.remove(self._conns_pair.parent_conn)
         self._conns_pair.parent_conn.close()
         # just in case
         self._parent_queue.join()
@@ -391,10 +391,12 @@ class TemporaryDirectory(OriginalTemporaryDirectory):
         *,
         cleanup: bool = True,
     ) -> None:
-        super().__init__(suffix=suffix, prefix=prefix, dir=str(dir), ignore_cleanup_errors=True)
+        if dir is not None:
+            dir = str(dir) # noqa: A001
+        super().__init__(suffix=suffix, prefix=prefix, dir=dir, ignore_cleanup_errors=True)
         self.do_cleanup = cleanup
         if not self.do_cleanup:
-            self._finalizer.detach()
+            self._finalizer.detach() # type: ignore [attr-defined]
 
     def cleanup(self) -> None:
         if self.do_cleanup:
