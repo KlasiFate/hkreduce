@@ -1,8 +1,6 @@
 import multiprocessing
 from contextlib import contextmanager
 from enum import Enum, auto
-from multiprocessing.connection import Connection
-from multiprocessing.context import Process
 from multiprocessing.synchronize import BoundedSemaphore
 from typing import Any, Generator, cast
 
@@ -11,20 +9,18 @@ from cantera import (  # type: ignore[import-untyped]
     IdealGasConstPressureReactor,
     IdealGasReactor,
     ReactorNet,
-    Solution,
     one_atm,
 )
 from numpy.typing import NDArray
 
-from .config import AutoignitionConditionConfig, ReducingTaskConfig
+from .config import Config
 from .errors import NoAutoignitionError, SampleCreatingError, TooSmallStepsSampleError
 from .logging import get_logger
 from .typing import AmountDefinitionType, PathLike
-from .utils import NumpyArrayDumper, WorkersCloser, create_unique_file
+from .utils import NumpyArrayDumper, Worker, WorkersManager, create_unique_file, load_model
 
 
 class Answer(int, Enum):
-    INITIALIZED = auto()
     SAMPLE_ERROR = auto()
     ERROR = auto()
     END = auto()
@@ -77,42 +73,41 @@ class StateLogger:
             self._dumper.close()
 
 
-class Simulation:
+class Simulation(Worker):
     def __init__(
         self,
+        config: Config,
         model_path: PathLike,
-        ai_condition: AutoignitionConditionConfig,
         ai_condition_idx: int,
-        tmp_dir: PathLike,
         sem: BoundedSemaphore,
-        conn: Connection,
         *,
         only_ignition_delay: bool,
     ) -> None:
+        super().__init__(name=f"simulation_for_{ai_condition_idx}_ai_condition")
+
+        self.config = config
         self.model_path = model_path
-        self.ai_condition = ai_condition
         self.ai_condition_idx = ai_condition_idx
-        self.tmp_dir = tmp_dir
         self.sem = sem
-        self.conn = conn
         self.only_ignition_delay = only_ignition_delay
         self.logger = get_logger()
 
-    def _run_simulation(self) -> StateLogger:  # noqa: C901
-        model = Solution(self.model_path)
-        if self.ai_condition == AmountDefinitionType.MOLES_FRACTIONS:
+    def _simulate(self) -> StateLogger:  # noqa: C901
+        model = load_model(self.model_path)
+        ai_condition = self.config.reducing_task_config.autoignition_conditions[self.ai_condition_idx]
+        if ai_condition.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS:
             model.TPX = (
-                self.ai_condition.temperature,
-                self.ai_condition.pressure * one_atm,
-                self.ai_condition.reactants,
+                ai_condition.temperature,
+                ai_condition.pressure * one_atm,
+                ai_condition.reactants,
             )
         else:
             model.TPY = (
-                self.ai_condition.temperature,
-                self.ai_condition.pressure * one_atm,
-                self.ai_condition.reactants,
+                ai_condition.temperature,
+                ai_condition.pressure * one_atm,
+                ai_condition.reactants,
             )
-        if self.ai_condition.kind == "CONSTANT_PRESSURE":
+        if ai_condition.kind == "CONSTANT_PRESSURE":
             reactor = IdealGasConstPressureReactor(model)
         else:
             reactor = IdealGasReactor(model)
@@ -120,13 +115,13 @@ class Simulation:
         simulation = ReactorNet([reactor])
         simulation.reinitialize()
 
-        if self.ai_condition.max_time_step:
-            simulation.max_time_step = self.ai_condition.max_time_step
-        end_of_time = self.ai_condition.end_of_time
+        if ai_condition.max_time_step:
+            simulation.max_time_step = ai_condition.max_time_step
+        end_of_time = ai_condition.end_of_time
 
-        residual_threshold = self.ai_condition.residual_threshold_coef * simulation.rtol
+        residual_threshold = ai_condition.residual_threshold_coef * simulation.rtol
 
-        state_logger: StateLogger = StateLogger(self.tmp_dir, self.ai_condition_idx)
+        state_logger: StateLogger = StateLogger(self.config.tmp_dir, self.ai_condition_idx)
 
         def sim() -> None:
             ignition_delay: float | None = None
@@ -138,7 +133,7 @@ class Simulation:
                 state_logger.update(simulation.time, reactor.T, reactor.thermo.P, reactor.Y)
 
             step_idx = 0
-            while step_idx < self.ai_condition.max_steps and (end_of_time is None or simulation.time < end_of_time):
+            while step_idx < ai_condition.max_steps and (end_of_time is None or simulation.time < end_of_time):
                 prev_state = simulation.get_state()
 
                 simulation.step()
@@ -146,7 +141,7 @@ class Simulation:
                 if not self.only_ignition_delay:
                     state_logger.update(simulation.time, reactor.T, reactor.thermo.P, reactor.Y)
 
-                if self.ai_condition.temperature + 400.0 <= reactor.T and ignition_delay is None:
+                if ai_condition.temperature + 400.0 <= reactor.T and ignition_delay is None:
                     ignition_delay = simulation.time
                     ignition_temperature = reactor.T
                     break
@@ -173,14 +168,16 @@ class Simulation:
         return state_logger
 
     def _create_sample(self, state_logger: StateLogger) -> NumpyArrayDumper:
+        ai_condition = self.config.reducing_task_config.autoignition_conditions[self.ai_condition_idx]
+
         if state_logger.ignition_delay is None or state_logger.ignition_temperature is None:
             msg = f"No auto ignition happened for {self.ai_condition_idx} case"
             self.logger.info(msg)
             raise NoAutoignitionError(msg)
 
-        temperature_diff = state_logger.ignition_temperature - self.ai_condition.temperature
+        temperature_diff = state_logger.ignition_temperature - ai_condition.temperature
 
-        temperature_delta = temperature_diff / self.ai_condition.steps_sample_size
+        temperature_delta = temperature_diff / ai_condition.steps_sample_size
 
         filename = create_unique_file(
             self.tmp_dir, prefix=f"steps_sample_of_{self.ai_condition_idx}_ai_case_", suffix=".npy"
@@ -190,18 +187,18 @@ class Simulation:
         with (
             state_logger.open_to_read(),
             NumpyArrayDumper(
-                dir=self.tmp_dir,
+                dir=self.config.tmp_dir,
                 filename=filename,
             ).open("w") as sample_saver,
         ):
             for __ in range(state_logger.logged_steps_count):
                 __, temperature, pressure, mass_fractions = state_logger.read_step_data()  # type: ignore[assignment]
-                if temperature >= self.ai_condition.temperature + i * temperature_delta:
+                if temperature >= ai_condition.temperature + i * temperature_delta:
                     data = np.concatenate((np.array((temperature, pressure), dtype=np.float64), mass_fractions), axis=0)
                     sample_saver.write_data(data)
                     i += 1
 
-        if i < self.ai_condition.steps_sample_size:
+        if i < ai_condition.steps_sample_size:
             msg = f"Too small steps sample is got for {self.ai_condition_idx} case. \
 Change steps sample size or case conditions"
             self.logger.info(msg)
@@ -209,90 +206,79 @@ Change steps sample size or case conditions"
 
         return sample_saver
 
-    def run(self) -> None:
-        self.conn.send((Answer.INITIALIZED, ()))
-
+    def _target(self) -> None:
         try:
             with self.sem:
-                self.logger.debug(f"Run simulation for {self.ai_condition_idx} case")
-                state_logger = self._run_simulation()
-                self.logger.debug(f"Simulation for {self.ai_condition_idx} case is finished")
+                state_logger = self._simulate()
                 if self.only_ignition_delay:
-                    self.conn.send((Answer.END, (state_logger.ignition_delay,)))
+                    self._send_msg_to_parent((Answer.END, (state_logger.ignition_delay,)))
                     return
 
-                self.logger.debug(f"Creating sample for {self.ai_condition_idx} case")
                 try:
                     sample = self._create_sample(state_logger)
                 except SampleCreatingError:
-                    self.conn.send((Answer.SAMPLE_ERROR, ()))
+                    self._send_msg_to_parent((Answer.SAMPLE_ERROR, ()))
                     return
-                self.logger.debug(f"Sample created for {self.ai_condition_idx} case")
-                self.conn.send((Answer.END, (sample, state_logger.ignition_delay)))
+                self._send_msg_to_parent((Answer.END, (sample, state_logger.ignition_delay)))
         except KeyboardInterrupt:
-            self.logger.info(f"Cancelling simulation process for {self.ai_condition_idx} case")
-        except Exception as error:
-            self.logger.opt(exception=error).critical(f"Error while simulation for {self.ai_condition_idx} case")
-            self.conn.send((Answer.ERROR, ()))
+            self.logger.info(
+                "Cancelling simulation process for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
+            )
+        except BaseException as error:
+            self.logger.opt(exception=error).critical(
+                "Error while simulation for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
+            )
+            self._send_msg_to_parent((Answer.ERROR, ()))
+            if not isinstance(error, Exception):
+                raise
         finally:
             self.logger.complete()
 
 
-class SimulationManager:
+class SimulationManager(WorkersManager):
     def __init__(
         self,
         model_path: PathLike,
-        reducing_task_config: ReducingTaskConfig,
-        num_threads: int,
-        tmp_dir: PathLike,
+        config: Config,
         *,
         only_ignition_delays: bool,
     ) -> None:
         self.model_path = model_path
-        self.reducing_task_config = reducing_task_config
-        self.tmp_dir = tmp_dir
+        self.config = config
         self.only_ignition_delays = only_ignition_delays
 
-        self._sem = multiprocessing.BoundedSemaphore(num_threads)
+        self._sem = multiprocessing.BoundedSemaphore(config.num_threads)
 
-    def _create_simulations(self) -> list[tuple[Process, Connection]]:
-        simulations: list[tuple[Process, Connection]] = []
-        for ai_cond_idx, ai_cond in enumerate(self.reducing_task_config.autoignition_conditions):
-            for_manager, for_simulation = multiprocessing.Pipe(duplex=True)
+        self.logger = get_logger()
 
-            simulation = Simulation(
-                model_path=self.model_path,
-                ai_condition=ai_cond,
-                ai_condition_idx=ai_cond_idx,
-                tmp_dir=self.tmp_dir,
-                sem=self._sem,
-                conn=for_simulation,
-                only_ignition_delay=self.only_ignition_delays,
+        super().__init__(self._create_simulations())
+
+    def _create_simulations(self) -> list[Simulation]:
+        simulations: list[Simulation] = []
+        for ai_cond_idx in range(len(self.config.reducing_task_config.autoignition_conditions)):
+            simulations.append(  # noqa: PERF401
+                Simulation(
+                    config=self.config,
+                    model_path=self.model_path,
+                    ai_condition_idx=ai_cond_idx,
+                    sem=self._sem,
+                    only_ignition_delay=self.only_ignition_delays,
+                )
             )
-
-            process_name = f"simulation_for_{ai_cond_idx}_ai_condition"
-            process = multiprocessing.Process(target=simulation.run, name=process_name, daemon=True)
-            simulations.append((process, for_manager))
-
         return simulations
 
     def run(self) -> tuple[list[NumpyArrayDumper], list[float]]:
-        logger = get_logger()
-        logger.debug("Creating simulations")
-        simulations = self._create_simulations()
-        logger.info("Starting simulations")
-        with WorkersCloser(simulations):
+        self.logger.info("Starting simulations")
+        with self:
             samples_savers: list[NumpyArrayDumper] = []
             ignition_delays: list[float] = []
-            for i, (__, conn) in enumerate(simulations):
-                message, details = cast(tuple[Answer, tuple[Any, ...]], conn.recv())
+            for simulation in self.workers:
+                message, details = cast(tuple[Answer, tuple[Any, ...]], simulation.get_msg_from_worker())
                 if message == Answer.SAMPLE_ERROR:
                     raise SampleCreatingError("No auto ignition detected or too small sample size")
 
                 if message != Answer.END:
                     raise RuntimeError("Error in simulation worker process")
-
-                logger.debug(f"Sample is got from reducer process for {i} case")
 
                 if self.only_ignition_delays:
                     ignition_delay = details[0]
@@ -301,7 +287,5 @@ class SimulationManager:
                     sample_saver, ignition_delay = details
                     samples_savers.append(sample_saver)
                     ignition_delays.append(ignition_delay)
-
-        logger.debug("Simulations are finished")
 
         return samples_savers, ignition_delays

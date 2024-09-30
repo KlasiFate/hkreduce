@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, Field, model_validator
 
+from ..setup import PathLike
 from .typing import AmountDefinitionType, ReducingMethod
 
 
@@ -13,7 +14,7 @@ class BaseModel(PydanticBaseModel, validate_assignment=True):
 
 
 def alias_generator(field_name: str) -> str:
-    if field_name.startswith('_'):
+    if field_name.startswith("_"):
         return field_name
     return field_name.replace("_", "-")
 
@@ -93,10 +94,12 @@ class ReducingTaskConfig(BaseModel):
 
 
 class Config(BaseModel):
-    input: Path
-    output: Path = Path("./output-model.yaml")
+    input: PathLike
+    output: PathLike = Path("./output-model.yaml")
     num_threads: int = Field(ge=1)
     debug: bool = False
+    reducing_task_config: ReducingTaskConfig
+    tmp_dir: PathLike
 
     @model_validator(mode="before")
     @classmethod

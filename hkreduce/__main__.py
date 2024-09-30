@@ -10,14 +10,29 @@ import yaml.error
 from cantera import Solution
 from pydantic import ValidationError
 
+from ..setup import PathLike
 from .config import Config, ReducingTaskConfig
 from .errors import BaseError
 from .logging import get_logger, setup_config
 from .main import Main
+from .utils import TemporaryDirectory
 
 
-def create_config(input: str, output: str | None, num_threads: int | None, debug: bool) -> Config:  # noqa: A002, FBT001
-    kwargs: dict[str, Any] = {"input": input, "debug": debug}
+def create_config(
+    input: str,  # noqa: A002
+    output: str | None,
+    num_threads: int | None,
+    tmp_dir: PathLike,
+    reducing_task_config: ReducingTaskConfig,
+    *,
+    debug: bool,
+) -> Config:
+    kwargs: dict[str, Any] = {
+        "input": input,
+        "debug": debug,
+        "tmp_dir": tmp_dir,
+        "reducing_task_config": reducing_task_config,
+    }
     if output is not None:
         kwargs["output"] = output
     if num_threads is not None:
@@ -30,15 +45,13 @@ def create_config(input: str, output: str | None, num_threads: int | None, debug
         raise ValueError(suberror["msg"]) from error
 
 
-def read_reducing_task_config(config: Config) -> ReducingTaskConfig:
-    default_msg = f"Wrong format of yaml file `{config.input}`."
+def read_reducing_task_config(input: PathLike) -> ReducingTaskConfig:  # noqa: A002
+    default_msg = f"Wrong format of yaml file `{input}`."
     try:
-        with open(config.input, "rt") as file:
+        with open(input, "rt") as file:
             data = yaml.safe_load(file)
     except OSError as error:
-        raise ValueError(
-            f"Can't read file `{config.input}` cause: `{error.strerror}`, errorno: {error.errno}"
-        ) from error
+        raise ValueError(f"Can't read file `{input}` cause: `{error.strerror}`, errorno: {error.errno}") from error
     except yaml.error.YAMLError as error:
         msg = default_msg
         if isinstance(error, yaml.error.MarkedYAMLError):
@@ -58,16 +71,14 @@ def read_reducing_task_config(config: Config) -> ReducingTaskConfig:
     if any(str(task.model) == datafile.name for datafile in cantera_datafiles):
         return task
     if not os.path.isabs(task.model):
-        task.model = config.input.parent / task.model
+        task.model = input.parent / task.model
     return task
 
 
-def run(model: Solution, config: Config, reducing_task_config: ReducingTaskConfig) -> None:
+def run(model: Solution, config: Config) -> None:
     Main(
         model=model,
-        reducing_task_config=reducing_task_config,
-        num_threads=config.num_threads,
-        output_model_path=config.output,
+        config=config
     ).run()
 
 
@@ -103,11 +114,10 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
     setup_config(debug=debug)
     logger = get_logger()
     try:
-        config = create_config(input, output, num_threads, debug=debug)
-        reducing_task_config = read_reducing_task_config(config)
+        reducing_task_config = read_reducing_task_config(input)
     except ValueError as error:
         logger.error(
-            f"Error while reading creating config or reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
+            f"Error while reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
         )
         logger.complete()
         return
@@ -132,7 +142,28 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         return
 
     try:
-        run(model, config, reducing_task_config)
+        with TemporaryDirectory(prefix="hkreduce_", cleanup=not debug) as tmp_dir:
+            config = create_config(
+                input=input,
+                output=output,
+                num_threads=num_threads,
+                tmp_dir=tmp_dir,
+                reducing_task_config=reducing_task_config,
+                debug=debug,
+            )
+    except ValueError as error:
+        logger.error(
+            f"Error while creating config. Error msg:\n{error.args[0]}"  # noqa: G004
+        )
+        logger.complete()
+        return
+    except Exception:  # noqa: BLE001
+        logger.opt(exception=True).critical("Uncaught error")
+        logger.complete()
+        return
+
+    try:
+        run(model, config)
     except BaseError as error:
         logger.error(error.msg)
         return
