@@ -27,7 +27,7 @@ class Answer(int, Enum):
 
 
 class StateLogger:
-    def __init__(self, tmp_dir: PathLike, ai_condition_idx: int) -> None:
+    def __init__(self, tmp_dir: PathLike, ai_condition_idx: int, n_species: int) -> None:
         self.max_temperature: float | None = None
         self.logged_steps_count = 0
         self.ignition_delay: float | None = None
@@ -35,8 +35,11 @@ class StateLogger:
 
         self.ai_condition_idx = ai_condition_idx
 
+        # TODO: this is create file when it is not necessary
         filename = create_unique_file(
-            suffix=".npy", prefix=f"steps_cache_of_{self.ai_condition_idx}_ai_case_", dir=tmp_dir
+            suffix=".npy",
+            prefix=f"steps_cache_of_{self.ai_condition_idx}_ai_cond_for_model_with_{n_species}_species_",
+            dir=tmp_dir,
         ).name
         self._dumper = NumpyArrayDumper(dir=tmp_dir, filename=filename)
 
@@ -94,8 +97,21 @@ class Simulation(Worker):
 
     def _simulate(self) -> StateLogger:  # noqa: C901
         model = load_model(self.model_path)
+
         ai_condition = self.config.reducing_task_config.autoignition_conditions[self.ai_condition_idx]
-        if ai_condition.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS:
+
+        if ai_condition.equivalence_ratio:
+            model.TP = (
+                ai_condition.temperature,
+                ai_condition.pressure * one_atm,
+            )
+            model.set_equivalence_ratio(
+                ai_condition.equivalence_ratio,
+                ai_condition.fuel,
+                ai_condition.oxidizer,
+                basis="mole" if ai_condition.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS else "mass",
+            )
+        elif ai_condition.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS:
             model.TPX = (
                 ai_condition.temperature,
                 ai_condition.pressure * one_atm,
@@ -107,6 +123,19 @@ class Simulation(Worker):
                 ai_condition.pressure * one_atm,
                 ai_condition.reactants,
             )
+
+        if self.config.debug:
+            with NumpyArrayDumper(
+                dir=self.config.tmp_dir,
+                filename=create_unique_file(
+                    dir=self.config.tmp_dir,
+                    prefix=f"stoich_coefs_of_model_with_{model.n_species}_species_",
+                    suffix=".npy",
+                ).name,
+            ).open("w") as saver:
+                saver.write_data(model.product_stoich_coeffs)
+                saver.write_data(model.reactant_stoich_coeffs)
+
         if ai_condition.kind == "CONSTANT_PRESSURE":
             reactor = IdealGasConstPressureReactor(model)
         else:
@@ -121,7 +150,7 @@ class Simulation(Worker):
 
         residual_threshold = ai_condition.residual_threshold_coef * simulation.rtol
 
-        state_logger: StateLogger = StateLogger(self.config.tmp_dir, self.ai_condition_idx)
+        state_logger: StateLogger = StateLogger(self.config.tmp_dir, self.ai_condition_idx, n_species=model.n_species)
 
         def sim() -> None:
             ignition_delay: float | None = None
@@ -251,7 +280,7 @@ class SimulationManager(WorkersManager):
 
         self.logger = get_logger()
 
-        super().__init__(self._create_simulations()) # type: ignore[arg-type]
+        super().__init__(self._create_simulations())  # type: ignore[arg-type]
 
     def _create_simulations(self) -> list[Simulation]:
         simulations: list[Simulation] = []
@@ -268,7 +297,6 @@ class SimulationManager(WorkersManager):
         return simulations
 
     def run(self) -> tuple[list[NumpyArrayDumper], list[float]]:
-        self.logger.info("Starting simulations")
         with self:
             samples_savers: list[NumpyArrayDumper] = []
             ignition_delays: list[float] = []

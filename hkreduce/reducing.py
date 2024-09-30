@@ -52,15 +52,42 @@ class Reducer(Worker):
         mass_fractions = state[2::]
 
         if self.config.reducing_task_config.method == ReducingMethod.DRG:
-            return create_matrix_for_drg(model, temperature, pressure, mass_fractions)
+            return create_matrix_for_drg(
+                model,
+                temperature,
+                pressure,
+                mass_fractions,
+                save=self.config.debug,
+                tmp_dir=self.config.tmp_dir,
+                ai_cond_idx=self.ai_condition_idx,
+                state_idx=self.state_idx,
+            )
         if self.config.reducing_task_config.method == ReducingMethod.DRGEP:
-            return create_matrix_for_drgep(model, temperature, pressure, mass_fractions)
-        return create_matrix_for_pfa(model, temperature, pressure, mass_fractions)
+            return create_matrix_for_drgep(
+                model,
+                temperature,
+                pressure,
+                mass_fractions,
+                save=self.config.debug,
+                tmp_dir=self.config.tmp_dir,
+                ai_cond_idx=self.ai_condition_idx,
+                state_idx=self.state_idx,
+            )
+        return create_matrix_for_pfa(
+            model,
+            temperature,
+            pressure,
+            mass_fractions,
+            save=self.config.debug,
+            tmp_dir=self.config.tmp_dir,
+            ai_cond_idx=self.ai_condition_idx,
+            state_idx=self.state_idx,
+        )
 
     def _reduce(self, sources: NDArray[np.uintp], threshold: float, matrix: CSRAdjacencyMatrix) -> NumpyArrayDumper:
         retained_species = matrix.run_reducing(self.config.reducing_task_config.method.name, threshold, sources)  # type: ignore[arg-type]
-        prefix = "retained_species_for_{}_and_{}_state_case_with_threshold_{}_".format(
-            self.ai_condition_idx, self.state_idx, str(threshold).replace(".", "__")
+        prefix = "retained_species_for_{}_state_of_{}_ai_cond_with_threshold_{}_".format(
+             self.state_idx, self.ai_condition_idx, str(threshold).replace(".", "p")
         )
         filepath = create_unique_file(
             dir=self.config.tmp_dir,
@@ -81,6 +108,12 @@ class Reducer(Worker):
                     ai_condition_idx=self.ai_condition_idx,
                 )
                 matrix = self._create_matrix(model)
+
+                self.logger.info(
+                    "Matrix for {state_idx} state of {ai_condition_idx} case is created",
+                    state_idx=self.state_idx,
+                    ai_condition_idx=self.ai_condition_idx,
+                )
 
                 self._send_msg_to_parent((Answer.MATRIX_CREATED, ()))
 
@@ -124,7 +157,7 @@ class ReducersManager(WorkersManager):
 
         self._sem = multiprocessing.BoundedSemaphore(config.num_threads)
 
-        super().__init__(self._create_reducers()) # type: ignore[arg-type]
+        super().__init__(self._create_reducers())  # type: ignore[arg-type]
 
         self._matrixes_created = False
 
@@ -138,7 +171,7 @@ class ReducersManager(WorkersManager):
             dir=self.config.tmp_dir,
             filename=create_unique_file(
                 dir=self.config.tmp_dir,
-                prefix=f"state_for_{ai_cond_idx}_ai_condition_and_{state_idx}_state_",
+                prefix=f"state_{state_idx}_of_{ai_cond_idx}_ai_cond_",
                 suffix=".npy",
             ).name,
         )

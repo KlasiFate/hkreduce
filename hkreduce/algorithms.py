@@ -3,16 +3,34 @@ from cantera import Solution  # type: ignore[import-untyped]
 from numpy.typing import NDArray
 
 from .cpp_interface import CSRAdjacencyMatrix
+from .typing import PathLike
+from .utils import NumpyArrayDumper, create_unique_file
 
 
-def create_matrix_for_drg(
+def create_matrix_for_drg(  # type: ignore[return]
     st: Solution,
     temperature: float,
     pressure: float,
     mass_fractions: NDArray[np.float64],
+    *,
+    save: bool,
+    tmp_dir: PathLike,
+    ai_cond_idx: int,
+    state_idx: int,
 ) -> CSRAdjacencyMatrix:
     # Устанавливаем состояние системы чтобы в дальнейшем взять необходимые данные, посчитанные cantera'ой
     st.TPY = (temperature, pressure, mass_fractions)
+
+    if save:
+        with NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir,
+                prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
+                suffix=".npy",
+            ),
+        ).open("w") as saver:
+            saver.write_data(st.net_rates_of_progress)
 
     # Данные взятые из canter'ы:
     #
@@ -77,8 +95,19 @@ def create_matrix_for_drg(
     except Exception as error:
         raise RuntimeError("Exception from c++ layer") from error
 
+    saver: NumpyArrayDumper | None = None
+    if save:
+        saver = NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
+            ),
+        ).open("w")
+
     for specy_a in range(st.n_species):
         if divider[specy_a] == 0:
+            if saver:
+                saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
             continue
 
         # specy_a - Индекс вещества A.
@@ -97,28 +126,53 @@ def create_matrix_for_drg(
         # Зануляем rAA
         coefs_for_specy_a[specy_a] = 0
 
+        if saver:
+            saver.write_data(coefs_for_specy_a)
+
         try:
             matrix.add_row(coefs_for_specy_a, specy_a)
         except Exception as error:
+            if saver:
+                saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
+        if saver:
+            saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
+    if saver:
+        saver.close()
     return matrix
 
 
-def create_matrix_for_drgep(
+def create_matrix_for_drgep(  # type: ignore[return]
     st: Solution,
     temperature: float,
     pressure: float,
     mass_fractions: NDArray[np.float64],
+    *,
+    save: bool,
+    tmp_dir: PathLike,
+    ai_cond_idx: int,
+    state_idx: int,
 ) -> CSRAdjacencyMatrix:
     # См. комментарии drg_run, тк большая часть кода аналогична
 
     st.TPY = (temperature, pressure, mass_fractions)
+
+    if save:
+        with NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir,
+                prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
+                suffix=".npy",
+            ),
+        ).open("w") as saver:
+            saver.write_data(st.net_rates_of_progress)
 
     valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
@@ -148,9 +202,20 @@ def create_matrix_for_drgep(
     except Exception as error:
         raise RuntimeError("Exception from c++ layer") from error
 
+    saver: NumpyArrayDumper | None = None
+    if save:
+        saver = NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
+            ),
+        ).open("w")
+
     for specy_a in range(st.n_species):
         divider = max(pa[specy_a], ca[specy_a])
         if divider == 0:
+            if saver:
+                saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
             continue
 
         coefs_for_specy_a = np.abs(np.sum(delta * base_rates_not_abs[specy_a], axis=1))
@@ -158,28 +223,53 @@ def create_matrix_for_drgep(
 
         coefs_for_specy_a[specy_a] = 0
 
+        if saver:
+            saver.write_data(coefs_for_specy_a)
+
         try:
             matrix.add_row(coefs_for_specy_a, specy_a)
         except Exception as error:
+            if saver:
+                saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
+        if saver:
+            saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
+    if saver:
+        saver.close()
     return matrix
 
 
-def create_matrix_for_pfa(
+def create_matrix_for_pfa(  # type: ignore[return]
     st: Solution,
     temperature: float,
     pressure: float,
     mass_fractions: NDArray[np.float64],
+    *,
+    save: bool,
+    tmp_dir: PathLike,
+    ai_cond_idx: int,
+    state_idx: int,
 ) -> CSRAdjacencyMatrix:
     # См. комментарии drg_run, тк большая часть кода аналогична
 
     st.TPX = (temperature, pressure, mass_fractions)
+
+    if save:
+        with NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir,
+                prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
+                suffix=".npy",
+            ),
+        ).open("w") as saver:
+            saver.write_data(st.net_rates_of_progress)
 
     valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
     product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
@@ -227,17 +317,34 @@ def create_matrix_for_pfa(
     except Exception as error:
         raise RuntimeError("Exception from c++ layer") from error
 
+    if save:
+        saver = NumpyArrayDumper(
+            dir=tmp_dir,
+            filename=create_unique_file(
+                dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
+            ),
+        ).open("w")
+
     for specy_a in range(st.n_species):
         rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
+
+        if saver:
+            saver.write_data(rab)
 
         try:
             matrix.add_row(rab, specy_a)
         except Exception as error:
+            if saver:
+                saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
+        if saver:
+            saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
+    if saver:
+        saver.close()
     return matrix

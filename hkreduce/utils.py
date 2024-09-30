@@ -408,10 +408,15 @@ _models_cache = weakref.WeakValueDictionary[str, ModelWrapper]()
 def load_model(model_path: PathLike) -> Solution:
     if isinstance(model_path, str):
         model_path = Path(model_path)
+
+    cantera_datafiles = [Path(path) for path in ct.list_data_files()]
     try:
-        key = str(model_path.resolve())
+        if not any(str(model_path) == datafile.name for datafile in cantera_datafiles):
+            model_path = model_path.resolve()
     except OSError as error:
         raise ValueError(f"Failed to load model: `{model_path}`") from error
+
+    key = str(model_path)
 
     model_wrapper = _models_cache.get(key)
     if model_wrapper is not None:

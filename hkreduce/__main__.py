@@ -47,7 +47,7 @@ def create_config(
 
 def read_reducing_task_config(input: PathLike) -> ReducingTaskConfig:  # noqa: A002
     if isinstance(input, str):
-        input = Path(input) # noqa: A001
+        input = Path(input)  # noqa: A001
 
     default_msg = f"Wrong format of yaml file `{input}`."
     try:
@@ -113,6 +113,9 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
     multiprocessing.set_start_method(method="spawn")
     setup_config(debug=debug)
     logger = get_logger()
+
+    logger.info("Start program")
+
     try:
         reducing_task_config = read_reducing_task_config(input)
     except ValueError as error:
@@ -141,7 +144,12 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         logger.complete()
         return
 
-    with TemporaryDirectory(prefix="hkreduce_", cleanup=not debug) as tmp_dir:
+    with TemporaryDirectory(
+        prefix=f"hkreduce_{reducing_task_config.method.lower()}_reduce_model_with_{model.n_species}_species_",
+        cleanup=not debug,
+    ) as tmp_dir:
+        if debug:
+            logger.info("Save all files in `{tmp_dir}` dir. This dir will not removed", tmp_dir=tmp_dir)
         try:
             config = create_config(
                 input=input,

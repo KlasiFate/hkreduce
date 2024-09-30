@@ -90,13 +90,21 @@ reactions at `{model_path}` gives: {error}",
 
             third_body = reaction.third_body
             if third_body:
+                # remove reactions with an explicit third body that has been removed
+                if (
+                    not third_body.default_efficiency
+                    and len(third_body.efficiencies) == 1
+                    and list(third_body.efficiencies)[0] in removed_species
+                ):
+                    continue
+
                 retained_efficiencies: dict[str, float] = {}
                 for specy_name, efficiency in cast(dict[str, float], third_body.efficiencies).items():
-                    if specy_name not in removed_species_names and efficiency != 0.0:
+                    if specy_name not in removed_species_names:
                         retained_efficiencies[specy_name] = efficiency  # noqa: PERF403
 
-                if len(retained_efficiencies) == 0:
-                    continue
+                # if len(retained_efficiencies) == 0 and not third_body.default_efficiency:
+                #     continue
 
                 third_body.efficiencies = retained_efficiencies
 
@@ -148,7 +156,7 @@ reactions at `{model_path}` gives: {error}",
             config=self.config,
             only_ignition_delays=False,
         ).run()
-        logger.info("Samples is got")
+        logger.info("Simulations are finished. Samples is got")
 
         with ReducersManager(config=self.config, samples_savers=samples_savers) as reducers_manager:
             initial_threshold = self.config.reducing_task_config.initial_threshold

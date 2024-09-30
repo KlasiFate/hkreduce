@@ -24,8 +24,14 @@ class AutoignitionConditionConfig(BaseModel):
     kind: Literal["CONSTANT_VOLUME", "CONSTANT_PRESSURE"]
     pressure: float
     temperature: float
+
+    reactants: dict[str, float] | None = None
+
+    fuel: dict[str, float] | None = None
+    oxidizer: dict[str, float] | None = None
+    equivalence_ratio: float | None = Field(default=None, gt=0.0)
+
     amount_definition_type: AmountDefinitionType = AmountDefinitionType.MOLES_FRACTIONS
-    reactants: dict[str, float]
 
     max_steps: int = Field(default=10 * 1000, gt=0)
     end_of_time: float | None = Field(default=None, gt=0.0)
@@ -34,16 +40,49 @@ class AutoignitionConditionConfig(BaseModel):
     steps_sample_size: int = Field(default=20, gt=0)
 
     @model_validator(mode="after")
-    def validate_reactants(self) -> "AutoignitionConditionConfig":
+    def validate_species_definitions(self) -> "AutoignitionConditionConfig":
+        if self.equivalence_ratio:
+            amount_definition = (
+                "Mole" if self.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS else "Mass"
+            )
+
+            if not (self.fuel and self.oxidizer):
+                raise ValueError("No fuel or oxidizer specified")
+            for fuel, mole_fraction in self.fuel.items():
+                if mole_fraction < 0:
+                    raise ValueError(f"{amount_definition} faction of fuel `{fuel}` is less than zero")
+            for oxidizer, mole_fraction in self.oxidizer.items():
+                if mole_fraction < 0:
+                    raise ValueError(f"{amount_definition} faction of oxidizer `{oxidizer}` is less than zero")
+
+            if self.reactants:
+                raise ValueError(
+                    "`Reactants` field can't be used with equivalence-ratio\\fuel\\oxidizer fields at the same time"
+                )
+            return self
+
+        if not self.reactants:
+            raise ValueError("No reactants or equivalence-ratio\\fuel\\oxidizer specified")
+
         for reactant, mass in self.reactants.items():
             if mass < 0:
                 raise ValueError(f"Mass of reactant `{reactant}` is less than zero")
+
         return self
 
     def check_all_reactants_exist(self, species: set[str], ai_cond_idx: int) -> None:
-        for reactant in self.reactants:
-            if reactant not in species:
-                raise ValueError(f"No such reactant `{reactant}` in model for {ai_cond_idx} case")
+        if self.reactants:
+            for reactant in self.reactants:
+                if reactant not in species:
+                    raise ValueError(f"No such reactant `{reactant}` in model for {ai_cond_idx} case")
+        if self.fuel:
+            for fuel in self.fuel:
+                if fuel not in species:
+                    raise ValueError(f"No such fuel `{fuel}` in model for {ai_cond_idx} case")
+        if self.oxidizer:
+            for oxidizer in self.oxidizer:
+                if oxidizer not in species:
+                    raise ValueError(f"No such reactant `{oxidizer}` in model for {ai_cond_idx} case")
 
 
 class ReducingTaskConfig(BaseModel):
