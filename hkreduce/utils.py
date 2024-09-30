@@ -148,8 +148,7 @@ class Shifter(threading.Thread):
             to_remove: list[Connection] = []
 
             for conn in ready_conns:
-                if not conn.poll(0):
-                    # closed
+                if conn.closed:
                     conns[conn][1].set()
                     to_remove.append(conn)
                     continue
@@ -162,7 +161,7 @@ class Shifter(threading.Thread):
                 for conn in to_remove:
                     self._conns.pop(conn, None)
 
-    def add(self, conn: Connection, queue: Queue, closed_event: threading.Event) -> None:
+    def add(self, conn: Connection, queue: multiprocessing.Queue, closed_event: threading.Event) -> None:
         with self._lock:
             if conn in self._conns:
                 raise ValueError("Already added")
@@ -200,16 +199,12 @@ class ConnsPair:
         return self._worker_conn
 
 
+# this is not in worker class to avoid pickling of parent conn
+_shifter: Shifter | None = None
+_shifter_install_lock = threading.Lock()
+
+
 class Worker(ABC, multiprocessing.Process):
-    _shifter: Shifter | None
-    _shifter_install_lock = threading.Lock()
-
-    @classmethod
-    def _remove_from_shifter(cls, conn: Connection) -> None:
-        if not cls._shifter:
-            raise ValueError("No shifter. First please add connection and queue")
-        cls._shifter.remove(conn)
-
     def __init__(
         self,
         name: str | None = None,
@@ -219,8 +214,8 @@ class Worker(ABC, multiprocessing.Process):
         super().__init__(name=name, daemon=daemon)
 
         self._conns_pair = ConnsPair()
-        self._conns_pair_closed_by_worker = threading.Event()
-        self._parent_queue: Queue = Queue()
+        self._conns_pair_closed_by_worker = multiprocessing.Event()
+        self._parent_queue = multiprocessing.Queue()
 
         self._finish_msg: Message | None = None
         self._read_user_msgs: list[Any] = []
@@ -237,7 +232,6 @@ class Worker(ABC, multiprocessing.Process):
         while deadline is None or time.time() < deadline:
             try:
                 msg = self._parent_queue.get(block=True, timeout=DEFAULT_POLL_TIMEOUT)
-                self._parent_queue.task_done()
                 break
             except Empty as error:
                 if not self._conns_pair_closed_by_worker.is_set():
@@ -286,7 +280,6 @@ Most likely it done job."
             raise ValueError("Not finished yet")
         while self._parent_queue.qsize():
             msg = self._parent_queue.get()
-            self._parent_queue.task_done()
 
             if not isinstance(msg, Message):
                 raise RuntimeError("Unknown msg is received")  # noqa: TRY004
@@ -303,11 +296,13 @@ Most likely it done job."
     def start(self) -> None:
         super().start()
 
-        if not self._shifter:
-            with self._shifter_install_lock:
-                if not self._shifter:
-                    self.__class__._shifter = Shifter()  # noqa: SLF001
-        self._shifter.add( # type: ignore[union-attr]
+        global _shifter
+        if not _shifter:
+            with _shifter_install_lock:
+                if not _shifter:
+                    _shifter = Shifter()  # noqa: SLF001
+                    _shifter.start()
+        _shifter.add(  # type: ignore[union-attr]
             self._conns_pair.parent_conn, self._parent_queue, closed_event=self._conns_pair_closed_by_worker
         )
 
@@ -315,7 +310,6 @@ Most likely it done job."
         while msg is None:
             try:
                 msg = self._parent_queue.get(block=True, timeout=DEFAULT_POLL_TIMEOUT)
-                self._parent_queue.task_done()
             except Empty as error:  # noqa: PERF203
                 if self._conns_pair_closed_by_worker.is_set():
                     raise RuntimeError('No "started" msg received') from error
@@ -324,14 +318,14 @@ Most likely it done job."
             raise RuntimeError('Not "started" msg is received')
 
     @abstractmethod
-    def _target(self) -> Any:
+    def _target_to_run(self) -> Any:
         raise NotImplementedError
 
     def run(self) -> None:
         try:
             self._conns_pair.worker_conn.send(Message("started", None))
             result: Any = None
-            self._target()
+            self._target_to_run()
             self._conns_pair.worker_conn.send(Message("success", result))
         except BaseException:
             self._conns_pair.worker_conn.send(Message("failed", None))
@@ -341,12 +335,10 @@ Most likely it done job."
 
     def close(self) -> None:
         super().close()
-        if self._shifter:
+        if _shifter:
             # Shifter should remove conn and queue but just in case
-            self._shifter.remove(self._conns_pair.parent_conn)
+            _shifter.remove(self._conns_pair.parent_conn)
         self._conns_pair.parent_conn.close()
-        # just in case
-        self._parent_queue.join()
 
 
 class WorkersManager:
@@ -392,11 +384,11 @@ class TemporaryDirectory(OriginalTemporaryDirectory):
         cleanup: bool = True,
     ) -> None:
         if dir is not None:
-            dir = str(dir) # noqa: A001
+            dir = str(dir)  # noqa: A001
         super().__init__(suffix=suffix, prefix=prefix, dir=dir, ignore_cleanup_errors=True)
         self.do_cleanup = cleanup
         if not self.do_cleanup:
-            self._finalizer.detach() # type: ignore [attr-defined]
+            self._finalizer.detach()  # type: ignore [attr-defined]
 
     def cleanup(self) -> None:
         if self.do_cleanup:
@@ -404,7 +396,13 @@ class TemporaryDirectory(OriginalTemporaryDirectory):
         return None
 
 
-_models_cache = weakref.WeakValueDictionary[str, Solution]()
+# Solution objects doesn't support weak refs
+class ModelWrapper:
+    def __init__(self, model: Solution) -> None:
+        self.model = model
+
+
+_models_cache = weakref.WeakValueDictionary[str, ModelWrapper]()
 
 
 def load_model(model_path: PathLike) -> Solution:
@@ -415,16 +413,16 @@ def load_model(model_path: PathLike) -> Solution:
     except OSError as error:
         raise ValueError(f"Failed to load model: `{model_path}`") from error
 
-    model = _models_cache.get(key)
-    if model is not None:
-        return model
+    model_wrapper = _models_cache.get(key)
+    if model_wrapper is not None:
+        return model_wrapper.model
 
     try:
         model = Solution(key)
     except ct.CanteraError as error:
         raise ValueError(f"Failed to load model: `{model_path}`") from error
 
-    _models_cache[key] = model
+    _models_cache[key] = ModelWrapper(model)
     return model
 
 

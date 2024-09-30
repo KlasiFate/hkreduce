@@ -141,8 +141,8 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         logger.complete()
         return
 
-    try:
-        with TemporaryDirectory(prefix="hkreduce_", cleanup=not debug) as tmp_dir:
+    with TemporaryDirectory(prefix="hkreduce_", cleanup=not debug) as tmp_dir:
+        try:
             config = create_config(
                 input=input,
                 output=output,
@@ -151,27 +151,27 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
                 reducing_task_config=reducing_task_config,
                 debug=debug,
             )
-    except ValueError as error:
-        logger.error(
-            f"Error while creating config. Error msg:\n{error.args[0]}"  # noqa: G004
-        )
-        logger.complete()
-        return
-    except Exception:  # noqa: BLE001
-        logger.opt(exception=True).critical("Uncaught error")
-        logger.complete()
-        return
+        except ValueError as error:
+            logger.error(
+                f"Error while creating config. Error msg:\n{error.args[0]}"  # noqa: G004
+            )
+            logger.complete()
+            return
+        except Exception:  # noqa: BLE001
+            logger.opt(exception=True).critical("Uncaught error")
+            logger.complete()
+            return
 
-    try:
-        run(model, config)
-    except BaseError as error:
-        logger.error(error.msg)
-        return
-    except Exception:  # noqa: BLE001
-        logger.opt(exception=True).critical("Uncaught error")
-        return
-    finally:
-        logger.complete()
+        try:
+            run(model, config)
+        except BaseError as error:
+            logger.error(error.msg)
+            return
+        except Exception:  # noqa: BLE001
+            logger.opt(exception=True).critical("Uncaught error")
+            return
+        finally:
+            logger.complete()
 
 
 if __name__ == "__main__":

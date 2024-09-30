@@ -206,7 +206,7 @@ Change steps sample size or case conditions"
 
         return sample_saver
 
-    def _target(self) -> None:
+    def _target_to_run(self) -> None:
         try:
             with self.sem:
                 state_logger = self._simulate()

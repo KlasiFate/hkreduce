@@ -71,7 +71,7 @@ class Reducer(Worker):
             retained_species_saver.write_data(retained_species)
         return retained_species_saver
 
-    def _target(self) -> None:
+    def _target_to_run(self) -> None:
         try:
             with self.sem:
                 model = load_model(self.config.reducing_task_config.model)

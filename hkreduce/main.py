@@ -63,6 +63,7 @@ class Main:
                 "Reduced model with {retained_species_len} species and {reactions_count} \
 reactions at `{model_path}` gives: {error}",
                 retained_species_len=len(retained_species),
+                reactions_count=reactions_count,
                 model_path=model_path,
                 error=error * 100,
             )
