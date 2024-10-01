@@ -129,12 +129,20 @@ class Simulation(Worker):
                 dir=self.config.tmp_dir,
                 filename=create_unique_file(
                     dir=self.config.tmp_dir,
-                    prefix=f"stoich_coefs_of_model_with_{model.n_species}_species_",
+                    prefix=f"reactants_stoich_coefs_of_model_with_{model.n_species}_species_",
+                    suffix=".npy",
+                ).name,
+            ).open("w") as saver:
+                saver.write_data(model.reactant_stoich_coeffs)
+            with NumpyArrayDumper(
+                dir=self.config.tmp_dir,
+                filename=create_unique_file(
+                    dir=self.config.tmp_dir,
+                    prefix=f"products_stoich_coefs_of_model_with_{model.n_species}_species_",
                     suffix=".npy",
                 ).name,
             ).open("w") as saver:
                 saver.write_data(model.product_stoich_coeffs)
-                saver.write_data(model.reactant_stoich_coeffs)
 
         if ai_condition.kind == "CONSTANT_PRESSURE":
             reactor = IdealGasConstPressureReactor(model)

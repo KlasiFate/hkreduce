@@ -43,3 +43,5 @@ __pycache__
 /build
 /hkreduce.egg-info
 *.env
+/scripts
+/reduce-gri30.yaml
