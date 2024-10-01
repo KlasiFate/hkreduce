@@ -1,4 +1,3 @@
-import multiprocessing
 import os
 from pathlib import Path
 from typing import Any
@@ -110,7 +109,6 @@ Default: n - 1 if system is mutlicores else 1",
     help="Enable debug mode that make logs more verbose",
 )
 def main(input: str, output: str | None, num_threads: int | None, debug: bool) -> None:  # noqa: A002,FBT001
-    multiprocessing.set_start_method(method="spawn")
     setup_config(debug=debug)
     logger = get_logger()
 
@@ -122,18 +120,15 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         logger.error(
             f"Error while reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
         )
-        logger.complete()
         return
     except Exception:  # noqa: BLE001
         logger.opt(exception=True).critical("Uncaught error")
-        logger.complete()
         return
 
     try:
         model = Solution(reducing_task_config.model)
     except ct.CanteraError as error:
         logger.error(f"Problems while loading model.\n{error.args[0]}")  # noqa: G004
-        logger.complete()
         return
 
     try:
@@ -141,7 +136,6 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
         reducing_task_config.check_all_species_exist(species)
     except ValueError as error:
         logger.error(error.args[0])
-        logger.complete()
         return
 
     with TemporaryDirectory(
@@ -163,11 +157,9 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
             logger.error(
                 f"Error while creating config. Error msg:\n{error.args[0]}"  # noqa: G004
             )
-            logger.complete()
             return
         except Exception:  # noqa: BLE001
             logger.opt(exception=True).critical("Uncaught error")
-            logger.complete()
             return
 
         try:
@@ -179,7 +171,7 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
             logger.opt(exception=True).critical("Uncaught error")
             return
         finally:
-            logger.complete()
+            logger.info("Program finished")
 
 
 if __name__ == "__main__":

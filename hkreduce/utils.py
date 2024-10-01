@@ -1,3 +1,4 @@
+import atexit
 import contextlib
 import multiprocessing
 import multiprocessing.connection
@@ -122,8 +123,10 @@ DEFAULT_POLL_TIMEOUT = 0.001
 
 
 class Shifter(threading.Thread):
+    WAIT_TIMEOUT = 0.5
+
     def __init__(self, poll_timeout: float = DEFAULT_POLL_TIMEOUT) -> None:
-        super().__init__(daemon=False, name="worker_connections_shifter")
+        super().__init__(daemon=True, name="worker_connections_shifter")
 
         self.poll_timeout = poll_timeout
         self._conns: dict[Connection, tuple[Queue, threading.Event]] = {}
@@ -142,7 +145,7 @@ class Shifter(threading.Thread):
                 continue
 
             ready_conns = cast(
-                list[Connection], multiprocessing.connection.wait(conns.keys(), timeout=self.poll_timeout)
+                list[Connection], multiprocessing.connection.wait(conns.keys(), timeout=self.WAIT_TIMEOUT)
             )
 
             to_remove: list[Connection] = []
@@ -205,6 +208,16 @@ _shifter_install_lock = threading.Lock()
 
 
 class Worker(ABC, multiprocessing.Process):
+    @classmethod
+    def _start_shifter_if_necessary(cls) -> None:
+        global _shifter
+        if not _shifter:
+            with _shifter_install_lock:
+                if not _shifter:
+                    _shifter = Shifter()
+                    _shifter.start()
+                    atexit.register(_shifter.close)
+
     def __init__(
         self,
         name: str | None = None,
@@ -296,12 +309,9 @@ Most likely it done job."
     def start(self) -> None:
         super().start()
 
-        global _shifter
-        if not _shifter:
-            with _shifter_install_lock:
-                if not _shifter:
-                    _shifter = Shifter()  # noqa: SLF001
-                    _shifter.start()
+        self._start_shifter_if_necessary()
+
+        assert _shifter # noqa: S101
         _shifter.add(  # type: ignore[union-attr]
             self._conns_pair.parent_conn, self._parent_queue, closed_event=self._conns_pair_closed_by_worker
         )

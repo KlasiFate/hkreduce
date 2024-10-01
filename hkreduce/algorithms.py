@@ -28,7 +28,7 @@ def create_matrix_for_drg(  # type: ignore[return]
                 dir=tmp_dir,
                 prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
                 suffix=".npy",
-            ),
+            ).name,
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
@@ -101,7 +101,7 @@ def create_matrix_for_drg(  # type: ignore[return]
             dir=tmp_dir,
             filename=create_unique_file(
                 dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
-            ),
+            ).name,
         ).open("w")
 
     for specy_a in range(st.n_species):
@@ -170,7 +170,7 @@ def create_matrix_for_drgep(  # type: ignore[return]
                 dir=tmp_dir,
                 prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
                 suffix=".npy",
-            ),
+            ).name,
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
@@ -208,7 +208,7 @@ def create_matrix_for_drgep(  # type: ignore[return]
             dir=tmp_dir,
             filename=create_unique_file(
                 dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
-            ),
+            ).name,
         ).open("w")
 
     for specy_a in range(st.n_species):
@@ -267,7 +267,7 @@ def create_matrix_for_pfa(  # type: ignore[return]
                 dir=tmp_dir,
                 prefix=f"net_rates_of_progress_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_",
                 suffix=".npy",
-            ),
+            ).name,
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
@@ -322,7 +322,7 @@ def create_matrix_for_pfa(  # type: ignore[return]
             dir=tmp_dir,
             filename=create_unique_file(
                 dir=tmp_dir, prefix=f"matrix_for_{state_idx}_state_of_{ai_cond_idx}_ai_cond_", suffix=".npy"
-            ),
+            ).name,
         ).open("w")
 
     for specy_a in range(st.n_species):
