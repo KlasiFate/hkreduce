@@ -10,7 +10,7 @@ from loguru import logger
 from .typing import LoggingConfig
 
 
-def get_config(*, debug: bool = False) -> LoggingConfig:
+def get_config(*, debug: bool = False, colorized_logs: bool = True) -> LoggingConfig:
     format = "{time:YYYY-MM-DDTHH:mm:ss.SSSSSS} - <level>{level:<9}</level> - {message}"  # noqa: A001
 
     level = "INFO"
@@ -19,7 +19,14 @@ def get_config(*, debug: bool = False) -> LoggingConfig:
 
     return {
         "handlers": [
-            {"sink": sys.stdout, "format": format, "colorize": True, "diagnose": debug, "level": level, "enqueue":True}
+            {
+                "sink": sys.stdout,
+                "format": format,
+                "colorize": colorized_logs,
+                "diagnose": debug,
+                "level": level,
+                "enqueue": True,
+            }
         ]
     }
 
@@ -28,12 +35,12 @@ _debug: bool = False
 _config_setup: bool = False
 
 
-def setup_config(config: LoggingConfig | None = None, *, debug: bool = False) -> None:
-    logger.remove() # sys.stderr is not picklable
+def setup_config(config: LoggingConfig | None = None, *, debug: bool = False, colorized_logs: bool = True) -> None:
+    logger.remove()  # sys.stderr is not picklable
     global _debug, _config_setup
     _debug = debug
     if config is None:
-        config = get_config(debug=debug)
+        config = get_config(debug=debug, colorized_logs=colorized_logs)
     logger.configure(**config)
     _config_setup = True
 

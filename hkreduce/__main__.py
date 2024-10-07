@@ -25,12 +25,14 @@ def create_config(
     reducing_task_config: ReducingTaskConfig,
     *,
     debug: bool,
+    colorized_logs: bool,
 ) -> Config:
     kwargs: dict[str, Any] = {
         "input": input,
         "debug": debug,
         "tmp_dir": tmp_dir,
         "reducing_task_config": reducing_task_config,
+        "colorized_logs": colorized_logs,
     }
     if output is not None:
         kwargs["output"] = output
@@ -108,8 +110,15 @@ Default: n - 1 if system is mutlicores else 1",
     default=False,
     help="Enable debug mode that make logs more verbose",
 )
-def main(input: str, output: str | None, num_threads: int | None, debug: bool) -> None:  # noqa: A002,FBT001
-    setup_config(debug=debug)
+@click.option(
+    "--colorized-logs",
+    required=False,
+    is_flag=True,
+    default=False,
+    help="Enable colorized output (if it is available)",
+)
+def main(input: str, output: str | None, num_threads: int | None, debug: bool, colorized_logs: bool) -> None:  # noqa: A002,FBT001
+    setup_config(debug=debug, colorized_logs=colorized_logs)
     logger = get_logger()
 
     logger.info("Start program")
@@ -152,6 +161,7 @@ def main(input: str, output: str | None, num_threads: int | None, debug: bool) -
                 tmp_dir=tmp_dir,
                 reducing_task_config=reducing_task_config,
                 debug=debug,
+                colorized_logs=colorized_logs,
             )
         except ValueError as error:
             logger.error(

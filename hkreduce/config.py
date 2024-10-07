@@ -136,6 +136,7 @@ class Config(BaseModel):
     output: PathLike = Path("./output-model.yaml")
     num_threads: int = Field(ge=1)
     debug: bool = False
+    colorized_logs: bool = True
     reducing_task_config: ReducingTaskConfig
     tmp_dir: PathLike
 
