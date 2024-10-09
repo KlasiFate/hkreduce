@@ -33,5 +33,9 @@ class ReducingError(BaseError):
     pass
 
 
-class AutoretrievingInitialThresholdError(ReducingError):
+class ThresholdError(ReducingError):
+    pass
+
+
+class AutoretrievingInitialThresholdError(ThresholdError):
     pass

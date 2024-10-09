@@ -11,11 +11,11 @@ from cantera import (  # type: ignore[import-untyped]
     ReactorNet,
     one_atm,
 )
+from loguru import logger
 from numpy.typing import NDArray
 
 from .config import Config
 from .errors import NoAutoignitionError, SampleCreatingError, TooSmallStepsSampleError
-from .logging import get_logger
 from .typing import AmountDefinitionType, PathLike
 from .utils import NumpyArrayDumper, Worker, WorkersManager, create_unique_file, load_model
 
@@ -32,28 +32,27 @@ class StateLogger:
         self.logged_steps_count = 0
         self.ignition_delay: float | None = None
         self.ignition_temperature: float | None = None
-
         self.ai_condition_idx = ai_condition_idx
+        self.tmp_dir = tmp_dir
+        self.n_species = n_species
 
-        # TODO: this is create file when it is not necessary
-        filename = create_unique_file(
-            suffix=".npy",
-            prefix=f"steps_cache_of_{self.ai_condition_idx}_ai_cond_for_model_with_{n_species}_species_",
-            dir=tmp_dir,
-        ).name
-        self._dumper = NumpyArrayDumper(dir=tmp_dir, filename=filename)
+        self._dumper: NumpyArrayDumper | None = None
 
     def update(self, time: float, temperature: float, pressure: float, mass_fractions: NDArray[np.float64]) -> None:
+        if self._dumper is None or self._mass_fractions_dumper is None:
+            raise ValueError("Not have been opened to write")
         if self.max_temperature is None or self.max_temperature < temperature:
             self.max_temperature = temperature
         self.logged_steps_count += 1
-        self._dumper.write_data(np.array([time, temperature, pressure], dtype=np.float64))
-        self._dumper.write_data(mass_fractions)
+        array = np.concatenate((np.array([time, temperature, pressure], dtype=np.float64), mass_fractions), axis=0)
+        self._dumper.write_data(array)
 
     def read_step_data(self) -> tuple[float, float, float, NDArray[np.float64]]:
-        time, temperature, pressure = self._dumper.read_data()
-        mass_fractions = self._dumper.read_data()
-        return time, temperature, pressure, mass_fractions
+        if self._dumper is None or self._mass_fractions_dumper is None:
+            raise ValueError("Not have been opened to read")
+        array = self._dumper.read_data()
+        time, temperature, pressure = array[:3:]
+        return time, temperature, pressure, array[3::]
 
     def set_ignition_delay_and_temperature(self, ignition_delay: float, temperature: float) -> None:
         self.ignition_delay = ignition_delay
@@ -62,13 +61,22 @@ class StateLogger:
     @contextmanager
     def open_to_write(self) -> Generator["StateLogger", Any, Any]:
         try:
+            filename = create_unique_file(
+                suffix=".npy",
+                prefix=f"steps_cache_of_{self.ai_condition_idx}_ai_cond_for_model_with_{self.n_species}_species_",
+                dir=self.tmp_dir,
+            ).name
+            self._dumper = NumpyArrayDumper(dir=self.tmp_dir, filename=filename)
             self._dumper.open("w")
+
             yield self
         finally:
             self._dumper.close()
 
     @contextmanager
     def open_to_read(self) -> Generator["StateLogger", Any, Any]:
+        if self._dumper is None:
+            raise ValueError("Not have been opened to write")
         try:
             self._dumper.open("r")
             yield self
@@ -93,7 +101,7 @@ class Simulation(Worker):
         self.ai_condition_idx = ai_condition_idx
         self.sem = sem
         self.only_ignition_delay = only_ignition_delay
-        self.logger = get_logger()
+        self.logger = logger
 
     def _simulate(self) -> StateLogger:  # noqa: C901
         model = load_model(self.model_path)
@@ -124,7 +132,8 @@ class Simulation(Worker):
                 ai_condition.reactants,
             )
 
-        if self.config.debug:
+        if self.config.verbose >= 3:
+            logger.trace("Save net stoich coefs")
             with NumpyArrayDumper(
                 dir=self.config.tmp_dir,
                 filename=create_unique_file(
@@ -209,7 +218,7 @@ class Simulation(Worker):
 
         if state_logger.ignition_delay is None or state_logger.ignition_temperature is None:
             msg = f"No auto ignition happened for {self.ai_condition_idx} case"
-            self.logger.info(msg)
+            self.logger.error(msg)
             raise NoAutoignitionError(msg)
 
         temperature_diff = state_logger.ignition_temperature - ai_condition.temperature
@@ -238,7 +247,7 @@ class Simulation(Worker):
         if i < ai_condition.steps_sample_size:
             msg = f"Too small steps sample is got for {self.ai_condition_idx} case. \
 Change steps sample size or case conditions"
-            self.logger.info(msg)
+            self.logger.error(msg)
             raise TooSmallStepsSampleError(msg)
 
         return sample_saver
@@ -246,6 +255,7 @@ Change steps sample size or case conditions"
     def _target_to_run(self) -> None:
         try:
             with self.sem:
+                self.logger.debug("Run simulation for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx)
                 state_logger = self._simulate()
                 if self.only_ignition_delay:
                     self._send_msg_to_parent((Answer.END, (state_logger.ignition_delay,)))
@@ -257,6 +267,9 @@ Change steps sample size or case conditions"
                     self._send_msg_to_parent((Answer.SAMPLE_ERROR, ()))
                     return
                 self._send_msg_to_parent((Answer.END, (sample, state_logger.ignition_delay)))
+                self.logger.debug(
+                    "Simulation is finished for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
+                )
         except KeyboardInterrupt:
             self.logger.info(
                 "Cancelling simulation process for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
@@ -269,6 +282,9 @@ Change steps sample size or case conditions"
             if not isinstance(error, Exception):
                 raise
         finally:
+            self.logger.trace(
+                "Complete logger for simulation {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
+            )
             self.logger.complete()
 
 
@@ -285,8 +301,6 @@ class SimulationManager(WorkersManager):
         self.only_ignition_delays = only_ignition_delays
 
         self._sem = multiprocessing.BoundedSemaphore(config.num_threads)
-
-        self.logger = get_logger()
 
         super().__init__(self._create_simulations())  # type: ignore[arg-type]
 
@@ -308,9 +322,12 @@ class SimulationManager(WorkersManager):
         with self:
             samples_savers: list[NumpyArrayDumper] = []
             ignition_delays: list[float] = []
-            for simulation in self.workers:
+            for i, simulation in enumerate(self.workers):
                 message, details = cast(tuple[Answer, tuple[Any, ...]], simulation.get_msg_from_worker())
                 if message == Answer.SAMPLE_ERROR:
+                    self.logger.info(
+                        "No auto ignition detected or too small sample size for {ai_cond_idx} case", ai_cond_idx=i
+                    )
                     raise SampleCreatingError("No auto ignition detected or too small sample size")
 
                 if message != Answer.END:
@@ -323,5 +340,10 @@ class SimulationManager(WorkersManager):
                     sample_saver, ignition_delay = details
                     samples_savers.append(sample_saver)
                     ignition_delays.append(ignition_delay)
+
+            for simulation in self.workers:
+                simulation.join(self.join_timeout_after_termination)
+                if simulation.is_alive():
+                    self.logger.error("Simulation worker process is still alive")
 
         return samples_savers, ignition_delays

@@ -1,21 +1,18 @@
 import sys
-from typing import TYPE_CHECKING
 
-if not TYPE_CHECKING:
-    from loguru import _Logger as Logger
-else:
-    from loguru import Logger
-from loguru import logger
+from loguru import logger as loguru_logger
 
 from .typing import LoggingConfig
 
 
-def get_config(*, debug: bool = False, colorized_logs: bool = True) -> LoggingConfig:
+def get_config(*, verbose: int = 0, colorized_logs: bool = True) -> LoggingConfig:
     format = "{time:YYYY-MM-DDTHH:mm:ss.SSSSSS} - <level>{level:<9}</level> - {message}"  # noqa: A001
 
     level = "INFO"
-    if debug:
+    if verbose >= 1:
         level = "DEBUG"
+    if verbose >= 2:
+        level = "TRACE"
 
     return {
         "handlers": [
@@ -23,7 +20,7 @@ def get_config(*, debug: bool = False, colorized_logs: bool = True) -> LoggingCo
                 "sink": sys.stdout,
                 "format": format,
                 "colorize": colorized_logs,
-                "diagnose": debug,
+                "diagnose": verbose >= 2,
                 "level": level,
                 "enqueue": True,
             }
@@ -31,23 +28,7 @@ def get_config(*, debug: bool = False, colorized_logs: bool = True) -> LoggingCo
     }
 
 
-_debug: bool = False
-_config_setup: bool = False
-
-
-def setup_config(config: LoggingConfig | None = None, *, debug: bool = False, colorized_logs: bool = True) -> None:
-    logger.remove()  # sys.stderr is not picklable
-    global _debug, _config_setup
-    _debug = debug
-    if config is None:
-        config = get_config(debug=debug, colorized_logs=colorized_logs)
-    logger.configure(**config)
-    _config_setup = True
-
-
-def get_logger() -> Logger:
-    if not _config_setup:
-        setup_config()
-    if _debug:
-        return logger.opt(exception=True)
-    return logger
+def setup_config(*, verbose: int = 0, colorized_logs: bool = True) -> None:
+    loguru_logger.remove()  # sys.stderr is not picklable
+    config = get_config(verbose=verbose, colorized_logs=colorized_logs)
+    loguru_logger.configure(**config)

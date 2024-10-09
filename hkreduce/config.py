@@ -1,6 +1,7 @@
 from multiprocessing import cpu_count
 from pathlib import Path
-from typing import Any, Literal
+from string import ascii_lowercase
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict, Field, model_validator
@@ -19,7 +20,7 @@ def alias_generator(field_name: str) -> str:
 
 
 class AutoignitionConditionConfig(BaseModel):
-    model_config = ConfigDict(alias_generator=alias_generator)
+    model_config = ConfigDict(BaseModel.model_config, alias_generator=alias_generator)  # type: ignore[misc]
 
     kind: Literal["CONSTANT_VOLUME", "CONSTANT_PRESSURE"]
     pressure: float
@@ -40,7 +41,7 @@ class AutoignitionConditionConfig(BaseModel):
     steps_sample_size: int = Field(default=20, gt=0)
 
     @model_validator(mode="after")
-    def validate_species_definitions(self) -> "AutoignitionConditionConfig":
+    def validate_species_definitions(self) -> "AutoignitionConditionConfig":  # noqa: C901
         if self.equivalence_ratio:
             amount_definition = (
                 "Mole" if self.amount_definition_type == AmountDefinitionType.MOLES_FRACTIONS else "Mass"
@@ -86,7 +87,7 @@ class AutoignitionConditionConfig(BaseModel):
 
 
 class ReducingTaskConfig(BaseModel):
-    model_config = ConfigDict(alias_generator=alias_generator)
+    model_config = ConfigDict(BaseModel.model_config, alias_generator=alias_generator)
 
     model: Path
     phase_name: str | None = None
@@ -131,14 +132,55 @@ class ReducingTaskConfig(BaseModel):
             ai_cond.check_all_reactants_exist(species, i)
 
 
+class CliOptionsAdditionalInfo:
+    def __init__(
+        self, *, required: Literal[False] | None = None, count: bool = False, count_flag_char: str | None = None
+    ) -> None:
+        self.required = required
+        if (
+            count
+            and count_flag_char is not None
+            and (len(count_flag_char) != 1 or count_flag_char[0] not in ascii_lowercase)
+        ):
+            raise ValueError("Invalid count_flag_char argument")
+        self.count = count
+        self.count_flag_name = count_flag_char
+
+
 class Config(BaseModel):
-    input: PathLike
-    output: PathLike = Path("./output-model.yaml")
-    num_threads: int = Field(ge=1)
-    debug: bool = False
-    colorized_logs: bool = True
-    reducing_task_config: ReducingTaskConfig
-    tmp_dir: PathLike
+    input: Annotated[PathLike, Field(description="Path to an yaml file that describes reducing task")]
+    output: Annotated[
+        PathLike,
+        Field(default=Path("./output-model.yaml"), description="Path to an yaml file that will store result model"),
+    ]
+    num_threads: Annotated[
+        int,
+        Field(
+            ge=1,
+            default=1,
+            description="Count of cpu cores used to execute parallel simulations and reducing processes graphes. \
+Default: n - 1 if system is mutlicores else 1",
+        ),
+    ]
+    creating_matrixes_num_threads: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Count of processes that will be executed parallel to create matrixes. \
+Default value equals --num-threads flag",
+        ),
+        CliOptionsAdditionalInfo(required=False),
+    ]
+    verbose: Annotated[
+        int,
+        Field(default=0, le=3, ge=0, description="Debug level. Can be repeated to increase level. Maximum is 3"),
+        CliOptionsAdditionalInfo(count=True, count_flag_char="v"),
+    ]
+
+    no_colorized_logs: Annotated[bool, Field(default=False, description="Disable colorized output")]
+
+    _reducing_task_config: ReducingTaskConfig | None = None
+    _tmp_dir: PathLike | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -148,4 +190,18 @@ class Config(BaseModel):
             if num_threads > 1:
                 num_threads -= 1
             data["num_threads"] = num_threads
+        if isinstance(data, dict) and "creating_matrixes_num_threads" not in data:
+            data["creating_matrixes_num_threads"] = data["num_threads"]
         return data
+
+    @property
+    def tmp_dir(self) -> Path:
+        if self._tmp_dir is None:
+            raise ValueError("No value")
+        return Path(self._tmp_dir)
+
+    @property
+    def reducing_task_config(self) -> ReducingTaskConfig:
+        if self._reducing_task_config is None:
+            raise ValueError("No value")
+        return self._reducing_task_config

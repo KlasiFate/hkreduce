@@ -1,5 +1,6 @@
 import numpy as np
 from cantera import Solution  # type: ignore[import-untyped]
+from loguru import logger
 from numpy.typing import NDArray
 
 from .cpp_interface import CSRAdjacencyMatrix
@@ -22,6 +23,9 @@ def create_matrix_for_drg(  # type: ignore[return]
     st.TPY = (temperature, pressure, mass_fractions)
 
     if save:
+        logger.trace(
+            "Save net rates for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         with NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -97,6 +101,9 @@ def create_matrix_for_drg(  # type: ignore[return]
 
     saver: NumpyArrayDumper | None = None
     if save:
+        logger.trace(
+            "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         saver = NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -106,7 +113,7 @@ def create_matrix_for_drg(  # type: ignore[return]
 
     for specy_a in range(st.n_species):
         if divider[specy_a] == 0:
-            if saver:
+            if save:
                 saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
             continue
 
@@ -126,24 +133,24 @@ def create_matrix_for_drg(  # type: ignore[return]
         # Зануляем rAA
         coefs_for_specy_a[specy_a] = 0
 
-        if saver:
+        if save:
             saver.write_data(coefs_for_specy_a)
 
         try:
             matrix.add_row(coefs_for_specy_a, specy_a)
         except Exception as error:
-            if saver:
+            if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
-        if saver:
+        if save:
             saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
-    if saver:
+    if save:
         saver.close()
     return matrix
 
@@ -164,6 +171,9 @@ def create_matrix_for_drgep(  # type: ignore[return]
     st.TPY = (temperature, pressure, mass_fractions)
 
     if save:
+        logger.trace(
+            "Save net rates for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         with NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -204,6 +214,9 @@ def create_matrix_for_drgep(  # type: ignore[return]
 
     saver: NumpyArrayDumper | None = None
     if save:
+        logger.trace(
+            "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         saver = NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -214,7 +227,7 @@ def create_matrix_for_drgep(  # type: ignore[return]
     for specy_a in range(st.n_species):
         divider = max(pa[specy_a], ca[specy_a])
         if divider == 0:
-            if saver:
+            if save:
                 saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
             continue
 
@@ -223,24 +236,24 @@ def create_matrix_for_drgep(  # type: ignore[return]
 
         coefs_for_specy_a[specy_a] = 0
 
-        if saver:
+        if save:
             saver.write_data(coefs_for_specy_a)
 
         try:
             matrix.add_row(coefs_for_specy_a, specy_a)
         except Exception as error:
-            if saver:
+            if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
-        if saver:
+        if save:
             saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
-    if saver:
+    if save:
         saver.close()
     return matrix
 
@@ -261,6 +274,9 @@ def create_matrix_for_pfa(  # type: ignore[return]
     st.TPX = (temperature, pressure, mass_fractions)
 
     if save:
+        logger.trace(
+            "Save net rates for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         with NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -318,6 +334,9 @@ def create_matrix_for_pfa(  # type: ignore[return]
         raise RuntimeError("Exception from c++ layer") from error
 
     if save:
+        logger.trace(
+            "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
+        )
         saver = NumpyArrayDumper(
             dir=tmp_dir,
             filename=create_unique_file(
@@ -328,23 +347,23 @@ def create_matrix_for_pfa(  # type: ignore[return]
     for specy_a in range(st.n_species):
         rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
 
-        if saver:
+        if save:
             saver.write_data(rab)
 
         try:
             matrix.add_row(rab, specy_a)
         except Exception as error:
-            if saver:
+            if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
     try:
         matrix.finalize()
     except Exception as error:
-        if saver:
+        if save:
             saver.close()
         raise RuntimeError("Exception from c++ layer") from error
 
-    if saver:
+    if save:
         saver.close()
     return matrix

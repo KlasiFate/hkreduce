@@ -18,6 +18,7 @@ from typing import Any, BinaryIO, Literal, NamedTuple, cast
 import cantera as ct  # type: ignore[import-untyped]
 import numpy as np
 from cantera import Solution
+from loguru import logger
 from numpy.typing import NDArray
 
 from .typing import PathLike
@@ -111,7 +112,7 @@ class NumpyArrayDumper:
         )
 
 
-MessageType = Literal["started", "success", "failed", "other"]
+MessageType = Literal["started", "finished", "other"]
 
 
 class Message(NamedTuple):
@@ -164,7 +165,7 @@ class Shifter(threading.Thread):
                 for conn in to_remove:
                     self._conns.pop(conn, None)
 
-    def add(self, conn: Connection, queue: multiprocessing.Queue, closed_event: threading.Event) -> None:
+    def add(self, conn: Connection, queue: Queue, closed_event: threading.Event) -> None:
         with self._lock:
             if conn in self._conns:
                 raise ValueError("Already added")
@@ -178,33 +179,21 @@ class Shifter(threading.Thread):
         self._closed = True
 
 
-# util class to avoid pickling of parent conn
-class ConnsPair:
-    def __init__(self) -> None:
-        self._parent_conn: Connection | None
-        self._parent_conn, self._worker_conn = multiprocessing.Pipe()
-
-    def __getstate__(self) -> Connection:
-        return self._worker_conn
-
-    def __setstate__(self, worker_conn: Connection) -> None:
-        self._worker_conn = worker_conn
-        self._parent_conn = None
-
-    @property
-    def parent_conn(self) -> Connection:
-        if self._parent_conn is None:
-            raise ValueError("Parent connection is not available in worker")
-        return self._parent_conn
-
-    @property
-    def worker_conn(self) -> Connection:
-        return self._worker_conn
-
-
 # this is not in worker class to avoid pickling of parent conn
 _shifter: Shifter | None = None
 _shifter_install_lock = threading.Lock()
+
+
+class NotPickableContainer:
+    def __init__(self, **kwargs: Any):
+        for name, attr in kwargs:
+            setattr(name, attr)
+
+    def __getstate__(self) -> None:
+        return None
+
+    def __setstate__(self, state: None) -> None:
+        return
 
 
 class Worker(ABC, multiprocessing.Process):
@@ -218,6 +207,10 @@ class Worker(ABC, multiprocessing.Process):
                     _shifter.start()
                     atexit.register(_shifter.close)
 
+    _parent_conn: Connection
+    _conns_pair_closed_by_worker: threading.Event
+    _parent_queue: Queue
+
     def __init__(
         self,
         name: str | None = None,
@@ -226,18 +219,16 @@ class Worker(ABC, multiprocessing.Process):
     ) -> None:
         super().__init__(name=name, daemon=daemon)
 
-        self._conns_pair = ConnsPair()
-        self._conns_pair_closed_by_worker = multiprocessing.Event()
-        self._parent_queue = multiprocessing.Queue()
+        parent_conn, self._worker_conn = multiprocessing.Pipe()
 
-        self._finish_msg: Message | None = None
-        self._read_user_msgs: list[Any] = []
+        self._not_pickable = NotPickableContainer(
+            _parent_conn=parent_conn, _conns_pair_closed_by_worker=threading.Event(), _parent_queue=Queue()
+        )
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._not_pickable, name)
 
     def get_msg_from_worker(self, timeout: float | None = None) -> Any:
-        # in case when a worker is dead and the success method was called
-        if self._read_user_msgs:
-            return self._read_user_msgs.pop(0)
-
         deadline: float | None = None
         if timeout is not None and timeout > 0:
             deadline = time.time() + timeout
@@ -260,8 +251,7 @@ Most likely it done job."
             raise RuntimeError("Unknown msg is received")  # noqa: TRY004
         if msg.type == "started":
             raise RuntimeError('Received "started" type message')
-        if msg.type in ("success", "failed"):
-            self._finish_msg = msg
+        if msg.type == "finished":
             raise ValueError(
                 "Workers has already finished (but maybe alive yet) and it didn't send messages. \
 Most likely it done job."
@@ -270,51 +260,28 @@ Most likely it done job."
         return msg.args
 
     def send_to_worker(self, obj: Any) -> None:
-        self._conns_pair.parent_conn.send(Message("other", obj))
+        self._parent_conn.send(Message("other", obj))
 
     def _send_msg_to_parent(self, obj: Any) -> None:
-        self._conns_pair.worker_conn.send(Message("other", obj))
+        self._worker_conn.send(Message("other", obj))
 
     def _get_msg_from_parent(self, timeout: float | None = None) -> Any:
-        if not self._conns_pair.worker_conn.poll(timeout):
+        if not self._worker_conn.poll(timeout):
             raise TimeoutError("No messages")
-        msg = self._conns_pair.worker_conn.recv()
+        msg = self._worker_conn.recv()
         if not isinstance(msg, Message):
             raise RuntimeError("Unknown msg is received")  # noqa: TRY004
         if msg.type != "other":
             raise RuntimeError('Received not "other" type message')
         return msg.args
 
-    def has_finished(self) -> bool:
-        return self._conns_pair_closed_by_worker.is_set()
-
-    def success(self) -> bool:
-        if not self.has_finished():
-            raise ValueError("Not finished yet")
-        while self._parent_queue.qsize():
-            msg = self._parent_queue.get()
-
-            if not isinstance(msg, Message):
-                raise RuntimeError("Unknown msg is received")  # noqa: TRY004
-            if msg.type == "started":
-                raise RuntimeError('Received "started" type message')
-            if msg.type == "other":
-                self._read_user_msgs.append(msg.args)
-                continue
-            self._finish_msg = msg
-        if self._finish_msg is None:
-            raise RuntimeError('No "success" or "failed" msg received')
-        return self._finish_msg.type == "success"
-
     def start(self) -> None:
         super().start()
 
         self._start_shifter_if_necessary()
 
-        assert _shifter # noqa: S101
-        _shifter.add(  # type: ignore[union-attr]
-            self._conns_pair.parent_conn, self._parent_queue, closed_event=self._conns_pair_closed_by_worker
-        )
+        assert _shifter  # noqa: S101
+        _shifter.add(self._parent_conn, self._parent_queue, closed_event=self._conns_pair_closed_by_worker)
 
         msg: Any = None
         while msg is None:
@@ -333,29 +300,32 @@ Most likely it done job."
 
     def run(self) -> None:
         try:
-            self._conns_pair.worker_conn.send(Message("started", None))
-            result: Any = None
+            self._worker_conn.send(Message("started", None))
             self._target_to_run()
-            self._conns_pair.worker_conn.send(Message("success", result))
-        except BaseException:
-            self._conns_pair.worker_conn.send(Message("failed", None))
-            raise
         finally:
-            self._conns_pair.worker_conn.close()
+            self._worker_conn.send(Message("finished", None))
+            self._worker_conn.close()
 
     def close(self) -> None:
         super().close()
         if _shifter:
             # Shifter should remove conn and queue but just in case
-            _shifter.remove(self._conns_pair.parent_conn)
-        self._conns_pair.parent_conn.close()
+            _shifter.remove(self._parent_conn)
+        self._parent_conn.close()
+
+
+DEFAULT_JOIN_TIMEOUT_AFTER_TERMINATION = 10
 
 
 class WorkersManager:
-    def __init__(self, workers: list[Worker]) -> None:
+    def __init__(
+        self, workers: list[Worker], *, join_timeout_after_termination: float = DEFAULT_JOIN_TIMEOUT_AFTER_TERMINATION
+    ) -> None:
         self.workers = workers
         self.opened = False
         self.closed = False
+        self.join_timeout_after_termination = join_timeout_after_termination
+        self.logger = logger
 
     def open(self) -> None:
         if self.opened or self.closed:
@@ -364,16 +334,28 @@ class WorkersManager:
             worker.start()
         self.opened = True
 
-    def close(self) -> None:
+    def close(self, finishing_timeout: float | None = 0) -> None:
         if not self.opened or self.closed:
             raise ValueError("Invalid state")
         for worker in self.workers:
-            if worker.has_finished() and worker.is_alive():
-                worker.join()
-            elif worker.is_alive():
+            if not worker.is_alive():
+                worker.close()
+                continue
+
+            if finishing_timeout == 0:
+                self.logger.warning("Worker is still alive. It will be terminated")
                 worker.terminate()
-                worker.join()
-            worker.close()
+            else:
+                worker.join(finishing_timeout)
+                if worker.is_alive():
+                    self.logger.warning("Worker is still alive although it has been waited to finishing")
+                    worker.terminate()
+
+            worker.join(self.join_timeout_after_termination)
+            if worker.is_alive():
+                self.logger.warning("Worker is still alive although it has been terminated")
+            else:
+                worker.close()
         self.closed = True
 
     def __enter__(self) -> "WorkersManager":

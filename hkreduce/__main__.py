@@ -3,15 +3,16 @@ from pathlib import Path
 from typing import Any
 
 import cantera as ct  # type: ignore[import-untyped]
-import click
 import yaml
 import yaml.error
 from cantera import Solution
+from loguru import logger
 from pydantic import ValidationError
 
+from .cli import gen_options
 from .config import Config, ReducingTaskConfig
 from .errors import BaseError
-from .logging import get_logger, setup_config
+from .logging import setup_config as setup_logging_config
 from .main import Main
 from .typing import PathLike
 from .utils import TemporaryDirectory
@@ -79,109 +80,63 @@ def read_reducing_task_config(input: PathLike) -> ReducingTaskConfig:  # noqa: A
     return task
 
 
-def run(model: Solution, config: Config) -> None:
-    Main(model=model, config=config).run()
-
-
-@click.command()
-@click.option(
-    "--input",
-    required=True,
-    type=str,
-    help="Path to an yaml file that describes reducing task",
-)
-@click.option(
-    "--output",
-    required=False,
-    type=str,
-    help="Path to an yaml file that describes reducing task",
-)
-@click.option(
-    "--num-threads",
-    required=False,
-    type=int,
-    help="Count of cpu cores used to execute parallel simulations and to reduce graphes. \
-Default: n - 1 if system is mutlicores else 1",
-)
-@click.option(
-    "--debug",
-    required=False,
-    is_flag=True,
-    default=False,
-    help="Enable debug mode that make logs more verbose",
-)
-@click.option(
-    "--colorized-logs",
-    required=False,
-    is_flag=True,
-    default=False,
-    help="Enable colorized output (if it is available)",
-)
-def main(input: str, output: str | None, num_threads: int | None, debug: bool, colorized_logs: bool) -> None:  # noqa: A002,FBT001
-    setup_config(debug=debug, colorized_logs=colorized_logs)
-    logger = get_logger()
-
-    logger.info("Start program")
+def run(**kwargs: Any) -> None:
+    try:
+        config = create_config(**kwargs)
+    except ValueError as error:
+        logger.opt(exception=kwargs["verbose"] >= 2).error(
+            "Error while creating config. Error msg:\n{msg}", msg=error.args[0]
+        )
+        return
 
     try:
         reducing_task_config = read_reducing_task_config(input)
     except ValueError as error:
-        logger.error(
-            f"Error while reading reducing task config. Error msg:\n{error.args[0]}"  # noqa: G004
+        logger.opt(exception=config.verbose >= 2).error(
+            "Error while reading reducing task config. Error msg:\n{msg}", msg=error.args[0]
         )
-        return
-    except Exception:  # noqa: BLE001
-        logger.opt(exception=True).critical("Uncaught error")
         return
 
     try:
         model = Solution(reducing_task_config.model)
     except ct.CanteraError as error:
-        logger.error(f"Problems while loading model.\n{error.args[0]}")  # noqa: G004
+        logger.opt(exception=config.verbose >= 2).error("Problems while loading model.\n{msg}", msg=error.args[0])
         return
 
     try:
         species = {specy.name for specy in model.species()}
         reducing_task_config.check_all_species_exist(species)
     except ValueError as error:
-        logger.error(error.args[0])
+        logger.opt(exception=config.verbose >= 2).error(error.args[0])
         return
 
     with TemporaryDirectory(
         prefix=f"hkreduce_{reducing_task_config.method.lower()}_reduce_model_with_{model.n_species}_species_",
-        cleanup=not debug,
+        cleanup=config.verbose >= 3,
     ) as tmp_dir:
-        if debug:
-            logger.info("Save all files in `{tmp_dir}` dir. This dir will not removed", tmp_dir=tmp_dir)
-        try:
-            config = create_config(
-                input=input,
-                output=output,
-                num_threads=num_threads,
-                tmp_dir=tmp_dir,
-                reducing_task_config=reducing_task_config,
-                debug=debug,
-                colorized_logs=colorized_logs,
-            )
-        except ValueError as error:
-            logger.error(
-                f"Error while creating config. Error msg:\n{error.args[0]}"  # noqa: G004
-            )
-            return
-        except Exception:  # noqa: BLE001
-            logger.opt(exception=True).critical("Uncaught error")
-            return
+        config._tmp_dir = tmp_dir  # noqa: SLF001
+        config._reducing_task_config = reducing_task_config  # noqa: SLF001
 
+        if config.verbose >= 3:
+            logger.trace('All output will be saved to "{tmp_dir}"', tmp_dir=tmp_dir)
         try:
-            run(model, config)
+            Main(model=model, config=config).run()
         except BaseError as error:
-            logger.error(error.msg)
-            return
-        except Exception:  # noqa: BLE001
-            logger.opt(exception=True).critical("Uncaught error")
-            return
-        finally:
-            logger.info("Program finished")
+            logger.opt(exception=config.verbose >= 2).error("Reason of finishing:\n{msg}", msg=error.msg)
+
+
+@gen_options
+def main(**kwargs: Any) -> None:
+    setup_logging_config(debug=kwargs["verbose"] > 0, colorized_logs=not kwargs["no_colorized_logs"])
+    logger.info("Start program")
+    try:
+        run()
+    except BaseException as error:  # noqa: BLE001
+        logger.opt(exception=error).critical("Uncaught error:")
+        if not isinstance(error, Exception):
+            raise
+    finally:
+        logger.info("Program finished")
 
 
 if __name__ == "__main__":

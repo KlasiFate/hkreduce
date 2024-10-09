@@ -2,11 +2,11 @@ import shutil
 import time
 from typing import Any, cast
 
-from cantera import Solution  # type: ignore[import-untyped]
+from cantera import Solution
+from loguru import logger  # type: ignore[import-untyped]
 
 from .config import Config
-from .errors import AutoretrievingInitialThresholdError, ReducingError, SimulationError
-from .logging import get_logger
+from .errors import AutoretrievingInitialThresholdError, ReducingError, SimulationError, ThresholdError
 from .reducing import ReducersManager
 from .simulation import SimulationManager
 from .typing import PathLike
@@ -21,7 +21,7 @@ class Main:
     ) -> None:
         self.model = model
         self.config = config
-        self.logger = get_logger()
+        self.logger = logger
 
     def _retrieve_initial_threshold(
         self, reducers_manager: ReducersManager, original_ignition_delays: list[float]
@@ -36,11 +36,13 @@ class Main:
             retained_species = reducers_manager.reduce(threshold)
             if len(retained_species) == self.model.n_species:
                 self.logger.info(
-                    "Reducing model doesn't reduce more species with threshold: {threshold}", threshold=threshold
+                    "Reducing model process doesn't reduce model with threshold: {threshold}", threshold=threshold
                 )
-                continue
+                break
             if len(retained_species) == 0:
-                self.logger.info("Reducing model reduce all species with threshold: {threshold}", threshold=threshold)
+                self.logger.info(
+                    "Reducing model process reduces all species with threshold: {threshold}", threshold=threshold
+                )
                 continue
 
             self.logger.info(
@@ -70,7 +72,15 @@ reactions at `{model_path}` gives: {error}",
             if error < self.config.reducing_task_config.max_error:
                 return threshold, model_path, retained_species, reactions_count, error
 
-        raise AutoretrievingInitialThresholdError("Auto retrieving initial threshold failed because no threshold")
+        self.logger.error(
+            "Auto retrieving initial threshold failed because no threshold that reduces model and satisfies \
+provided error limit"
+        )
+
+        raise AutoretrievingInitialThresholdError(
+            "Auto retrieving initial threshold failed because no threshold that reduces model and satisfies \
+provided error limit"
+        )
 
     def _create_reduced_model(self, retained_species: set[int]) -> tuple[Solution, PathLike]:
         removed_species = set(range(self.model.n_species))
@@ -144,46 +154,50 @@ reactions at `{model_path}` gives: {error}",
         return max_error
 
     def run(self) -> None:
-        logger = get_logger()
         start = time.time()
 
-        logger.info("Start simulations to retrieve samples")
+        self.logger.info("Start simulations to retrieve samples")
         samples_savers, original_ignition_delays = SimulationManager(
             model_path=self.config.reducing_task_config.model,
             config=self.config,
             only_ignition_delays=False,
         ).run()
-        logger.info("Simulations are finished. Samples is got")
+        self.logger.info("Simulations are finished. Samples is got")
 
         with ReducersManager(config=self.config, samples_savers=samples_savers) as reducers_manager:
             initial_threshold = self.config.reducing_task_config.initial_threshold
 
             if not self.config.reducing_task_config._initial_threshold_set_by_user:  # noqa: SLF001
-                logger.info("Start auto retrieving initial threshold")
+                self.logger.info("Start auto retrieving initial threshold")
                 initial_threshold, model_path, retained_species, retained_reactions_count, error = (
                     self._retrieve_initial_threshold(reducers_manager, original_ignition_delays)
                 )
-                logger.info("Use {threshold} as initial threshold", threshold=initial_threshold)
+                self.logger.info("Use {threshold} as initial threshold", threshold=initial_threshold)
             else:
-                logger.info("Reduce model with threshold: {threshold}", threshold=initial_threshold)
+                self.logger.info("Reduce model with threshold: {threshold}", threshold=initial_threshold)
                 retained_species = reducers_manager.reduce(initial_threshold)
-                logger.info(
+                self.logger.info(
                     "Model reduced with {retained_species_count} species and threshold {threshold}",
                     retained_species_count=len(retained_species),
                     threshold=initial_threshold,
                 )
+                if len(retained_species) == self.model.n_species:
+                    self.logger.info(
+                        "Model doesn't reduced with user provided threshold: {threshold}", threshold=initial_threshold
+                    )
+                    raise ThresholdError("Model doesn't reduced with user provided threshold: {threshold}")
 
                 model, model_path = self._create_reduced_model(retained_species)
                 retained_reactions_count = len(model.reactions())
-                logger.info(
+                self.logger.info(
                     "Created reduced model with {retained_species_count} species: `{model_path}`",
                     retained_species_count=len(retained_species),
                     model_path=model_path,
                 )
 
-                logger.info("Calculating error")
+                self.logger.info("Calculating error")
                 error = self._calc_error(model_path, original_ignition_delays)
-                logger.info(
+                self.logger.info(
                     "Reduced model with {retained_species_count} species and {retained_reactions_count} \
 reactions at `{model_path}` gives: {error}",
                     retained_species_count=len(retained_species),
@@ -206,7 +220,7 @@ reactions at `{model_path}` gives: {error}",
                 else:
                     threshold += initial_threshold
 
-                logger.info("Reduce model with threshold: {threshold}", threshold=threshold)
+                self.logger.info("Reduce model with threshold: {threshold}", threshold=threshold)
                 retained_species = reducers_manager.reduce(threshold)
                 if len(retained_species) == prev_retained_species_count:
                     logger.info(
@@ -214,7 +228,7 @@ reactions at `{model_path}` gives: {error}",
                     )
                     continue
 
-                logger.info(
+                self.logger.info(
                     "Model reduced with {retained_species_count} species and threshold {threshold}",
                     retained_species_count=len(retained_species),
                     threshold=threshold,
@@ -222,7 +236,7 @@ reactions at `{model_path}` gives: {error}",
 
                 model, model_path = self._create_reduced_model(retained_species)
                 retained_reactions_count = len(model.reactions())
-                logger.info(
+                self.logger.info(
                     "Created reduced model with {retained_species_count} species and \
 {retained_reactions_count} reactions: `{model_path}`",
                     retained_species_count=len(retained_species),
@@ -230,10 +244,10 @@ reactions at `{model_path}` gives: {error}",
                     model_path=model_path,
                 )
 
-                logger.info("Calculating error")
+                self.logger.info("Calculating error")
                 error = self._calc_error(model_path, original_ignition_delays)
                 if error > self.config.reducing_task_config.max_error:
-                    logger.info(
+                    self.logger.info(
                         "Reduced model with {retained_species_count} species and {retained_reactions_count} \
 reactions at `{model_path}` gives too large error: {error}",
                         retained_species_count=len(retained_species),
@@ -248,7 +262,7 @@ reactions at `{model_path}` gives too large error: {error}",
                 prev_retained_reactions_count = retained_reactions_count
                 prev_error = error
 
-                logger.info(
+                self.logger.info(
                     "Reduced model with {retained_species_count} species and {retained_reactions_count} \
 at `{model_path}` gives error: {error}",
                     retained_species_count=len(retained_species),
@@ -257,21 +271,21 @@ at `{model_path}` gives error: {error}",
                     error=error * 100,
                 )
 
-            logger.info(
+            self.logger.info(
                 "Use model with {retained_species_count} species and {retained_reactions_count} \
 at `{model_path}` as result",
                 retained_species_count=prev_retained_species_count,
                 retained_reactions_count=prev_retained_reactions_count,
                 model_path=prev_model_path,
             )
-            logger.info("Copying model to output path")
+            self.logger.info("Copying model to output path")
             try:
                 shutil.copyfile(model_path, self.config.output)
             except Exception as error:
                 raise RuntimeError(f"Failed to copy result reduced model to {self.config.output}") from error
 
             stop = time.time()
-            logger.info(
+            self.logger.info(
                 "Stats: time: {time} species: {retained_species_count} \
 reactions: {retained_reactions_count} error: {error}",
                 time=round(stop - start, 6),
