@@ -18,28 +18,7 @@ from .typing import PathLike
 from .utils import TemporaryDirectory
 
 
-def create_config(
-    input: str,  # noqa: A002
-    output: str | None,
-    num_threads: int | None,
-    tmp_dir: PathLike,
-    reducing_task_config: ReducingTaskConfig,
-    *,
-    debug: bool,
-    colorized_logs: bool,
-) -> Config:
-    kwargs: dict[str, Any] = {
-        "input": input,
-        "debug": debug,
-        "tmp_dir": tmp_dir,
-        "reducing_task_config": reducing_task_config,
-        "colorized_logs": colorized_logs,
-    }
-    if output is not None:
-        kwargs["output"] = output
-    if num_threads is not None:
-        kwargs["num_threads"] = num_threads
-
+def create_config(**kwargs: Any) -> Config:
     try:
         return Config(**kwargs)
     except ValidationError as error:
@@ -90,7 +69,7 @@ def run(**kwargs: Any) -> None:
         return
 
     try:
-        reducing_task_config = read_reducing_task_config(input)
+        reducing_task_config = read_reducing_task_config(config.input)
     except ValueError as error:
         logger.opt(exception=config.verbose >= 2).error(
             "Error while reading reducing task config. Error msg:\n{msg}", msg=error.args[0]
@@ -98,6 +77,7 @@ def run(**kwargs: Any) -> None:
         return
 
     try:
+        logger.trace("Load model")
         model = Solution(reducing_task_config.model)
     except ct.CanteraError as error:
         logger.opt(exception=config.verbose >= 2).error("Problems while loading model.\n{msg}", msg=error.args[0])
@@ -112,7 +92,7 @@ def run(**kwargs: Any) -> None:
 
     with TemporaryDirectory(
         prefix=f"hkreduce_{reducing_task_config.method.lower()}_reduce_model_with_{model.n_species}_species_",
-        cleanup=config.verbose >= 3,
+        cleanup=config.verbose < 3,
     ) as tmp_dir:
         config._tmp_dir = tmp_dir  # noqa: SLF001
         config._reducing_task_config = reducing_task_config  # noqa: SLF001
@@ -127,10 +107,11 @@ def run(**kwargs: Any) -> None:
 
 @gen_options
 def main(**kwargs: Any) -> None:
-    setup_logging_config(debug=kwargs["verbose"] > 0, colorized_logs=not kwargs["no_colorized_logs"])
+    kwargs = {name: value for name, value in kwargs.items() if value is not None}
+    setup_logging_config(verbose=kwargs["verbose"], colorized_logs=not kwargs["no_colorized_logs"])
     logger.info("Start program")
     try:
-        run()
+        run(**kwargs)
     except BaseException as error:  # noqa: BLE001
         logger.opt(exception=error).critical("Uncaught error:")
         if not isinstance(error, Exception):

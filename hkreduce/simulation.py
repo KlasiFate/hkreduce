@@ -39,7 +39,7 @@ class StateLogger:
         self._dumper: NumpyArrayDumper | None = None
 
     def update(self, time: float, temperature: float, pressure: float, mass_fractions: NDArray[np.float64]) -> None:
-        if self._dumper is None or self._mass_fractions_dumper is None:
+        if self._dumper is None:
             raise ValueError("Not have been opened to write")
         if self.max_temperature is None or self.max_temperature < temperature:
             self.max_temperature = temperature
@@ -48,7 +48,7 @@ class StateLogger:
         self._dumper.write_data(array)
 
     def read_step_data(self) -> tuple[float, float, float, NDArray[np.float64]]:
-        if self._dumper is None or self._mass_fractions_dumper is None:
+        if self._dumper is None:
             raise ValueError("Not have been opened to read")
         array = self._dumper.read_data()
         time, temperature, pressure = array[:3:]
@@ -258,15 +258,18 @@ Change steps sample size or case conditions"
                 self.logger.debug("Run simulation for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx)
                 state_logger = self._simulate()
                 if self.only_ignition_delay:
+                    self.logger.debug(
+                        "Simulation is finished for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
+                    )
                     self._send_msg_to_parent((Answer.END, (state_logger.ignition_delay,)))
                     return
 
                 try:
                     sample = self._create_sample(state_logger)
+                    self._send_msg_to_parent((Answer.END, (sample, state_logger.ignition_delay)))
                 except SampleCreatingError:
                     self._send_msg_to_parent((Answer.SAMPLE_ERROR, ()))
                     return
-                self._send_msg_to_parent((Answer.END, (sample, state_logger.ignition_delay)))
                 self.logger.debug(
                     "Simulation is finished for {ai_condition_idx} case", ai_condition_idx=self.ai_condition_idx
                 )

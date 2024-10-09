@@ -231,6 +231,7 @@ class ReducersManager(WorkersManager):
             reducer.join(self.join_timeout)
             if reducer.is_alive():
                 self.logger.error("Reducer worker process is still alive")
+        super().close()
 
     def reduce(self, threshold: float) -> set[int]:
         if not self._matrixes_created:

@@ -124,8 +124,6 @@ DEFAULT_POLL_TIMEOUT = 0.001
 
 
 class Shifter(threading.Thread):
-    WAIT_TIMEOUT = 0.5
-
     def __init__(self, poll_timeout: float = DEFAULT_POLL_TIMEOUT) -> None:
         super().__init__(daemon=True, name="worker_connections_shifter")
 
@@ -146,21 +144,32 @@ class Shifter(threading.Thread):
                 continue
 
             ready_conns = cast(
-                list[Connection], multiprocessing.connection.wait(conns.keys(), timeout=self.WAIT_TIMEOUT)
+                list[Connection], multiprocessing.connection.wait(conns.keys(), timeout=self.poll_timeout)
             )
 
             to_remove: list[Connection] = []
 
             for conn in ready_conns:
                 if conn.closed:
-                    conns[conn][1].set()
+                    # maybe closed and removed by worker when the shifter was waiting
                     to_remove.append(conn)
                     continue
 
                 queue = conns[conn][0]
-                while conn.poll(0):
-                    queue.put(conn.recv())
+                closed = False
+                try:
+                    while conn.poll(0):
+                        queue.put(conn.recv())
+                except EOFError:
+                    closed = True
 
+                if closed:
+                    conns[conn][1].set()
+                    to_remove.append(conn)
+                    continue
+
+            if not to_remove:
+                continue
             with self._lock:
                 for conn in to_remove:
                     self._conns.pop(conn, None)
@@ -186,14 +195,19 @@ _shifter_install_lock = threading.Lock()
 
 class NotPickableContainer:
     def __init__(self, **kwargs: Any):
-        for name, attr in kwargs:
-            setattr(name, attr)
+        self.attrs = kwargs
 
-    def __getstate__(self) -> None:
-        return None
+    def get(self, name: str) -> Any:
+        return self.attrs[name]
 
-    def __setstate__(self, state: None) -> None:
-        return
+    def has(self, name: str) -> Any:
+        return name in self.attrs
+
+    def __getstate__(self) -> dict:
+        return {"doesnt-matter": True}
+
+    def __setstate__(self, state: dict) -> None:
+        self.attrs = {}
 
 
 class Worker(ABC, multiprocessing.Process):
@@ -226,7 +240,15 @@ class Worker(ABC, multiprocessing.Process):
         )
 
     def __getattr__(self, name: str) -> Any:
-        return getattr(self._not_pickable, name)
+        try:
+            _not_pickable = super().__getattribute__("_not_pickable")
+        except AttributeError:
+            # child process starting moment when attributes is not set yet
+            _not_pickable = None
+
+        if _not_pickable and self._not_pickable.has(name):
+            return self._not_pickable.get(name)
+        raise AttributeError(f'No such attribute "{name}"')
 
     def get_msg_from_worker(self, timeout: float | None = None) -> Any:
         deadline: float | None = None

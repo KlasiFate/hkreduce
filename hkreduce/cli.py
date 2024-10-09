@@ -12,8 +12,8 @@ PRIMITIVE_TYPES = [
 ]
 
 
-def gen_options(main_func: Callable) -> None: # noqa: C901
-    for field_name, field_info in list(Config.model_fields.items()).reverse():
+def gen_options(main_func: Callable) -> None:  # noqa: C901
+    for field_name, field_info in reversed(list(Config.model_fields.items())):
         if field_name.startswith("_"):
             continue
 
@@ -21,9 +21,9 @@ def gen_options(main_func: Callable) -> None: # noqa: C901
 
         cli_option_info: CliOptionsAdditionalInfo | None = None
         if field_info.metadata:
-            cli_option_info = field_info.metadata[0]
-            if not isinstance(cli_option_info, CliOptionsAdditionalInfo):
-                raise TypeError(f'Field "{field_name}" is annotated with no instance of CliOptionsAdditionalInfo')
+            for meta_data_element in field_info.metadata:
+                if isinstance(meta_data_element, CliOptionsAdditionalInfo):
+                    cli_option_info = meta_data_element
 
         types: list[type[Any]] = []
         if isinstance(field_info.annotation, (type(str | int), type(Optional[int]))):
@@ -47,9 +47,8 @@ def gen_options(main_func: Callable) -> None: # noqa: C901
         if field_info.is_required() and cli_option_info and cli_option_info.required is not None:
             click_kwargs["required"] = cli_option_info.required
 
-
         if field_info.default is not PydanticUndefined:
-            click_kwargs['default'] = field_info.default
+            click_kwargs["default"] = field_info.default
 
         if field_info.description:
             click_kwargs["help"] = field_info.description
@@ -58,9 +57,9 @@ def gen_options(main_func: Callable) -> None: # noqa: C901
         if len(field_name) == 1:
             option_decls.append(f"-{field_name}")
         else:
-            option_decls.append(f'--{field_name.replace('_', '-')}')
+            option_decls.append(f"--{field_name.replace('_', '-')}")
 
-        if option_type is int and cli_option_info.count:
+        if option_type is int and cli_option_info and cli_option_info.count:
             click_kwargs["count"] = True
             if cli_option_info.count_flag_name:
                 ad_decl = f"-{cli_option_info.count_flag_name}"

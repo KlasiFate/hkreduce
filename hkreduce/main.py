@@ -1,6 +1,6 @@
 import shutil
 import time
-from typing import Any, cast
+from typing import Any
 
 from cantera import Solution
 from loguru import logger  # type: ignore[import-untyped]
@@ -99,21 +99,18 @@ provided error limit"
                 continue
 
             third_body = reaction.third_body
+            if (
+                third_body
+                and not getattr(third_body, "default_efficiency", 1.0)
+                and len(third_body.efficiencies) == 1
+                and list(third_body.efficiencies.keys())[0] in removed_species_names
+            ):
+                continue
+
             if third_body:
-                # remove reactions with an explicit single third body that has been removed
-                if len(third_body.efficiencies) == 1 and list(third_body.efficiencies)[0] in removed_species_names:
-                    continue
-
-                if len(third_body.efficiencies) > 1:
-                    retained_efficiencies: dict[str, float] = {}
-                    for specy_name, efficiency in cast(dict[str, float], third_body.efficiencies).items():
-                        if specy_name not in removed_species_names:
-                            retained_efficiencies[specy_name] = efficiency  # noqa: PERF403
-
-                    if len(retained_efficiencies) == 0 and not third_body.default_efficiency:
-                        continue
-
-                third_body.efficiencies = retained_efficiencies
+                third_body.efficiencies = {
+                    sp: val for sp, val in third_body.efficiencies.items() if sp not in removed_species_names
+                }
 
             reactions_of_reduced_model.append(reaction)
 
