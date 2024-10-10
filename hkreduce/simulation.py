@@ -229,7 +229,6 @@ class Simulation(Worker):
             self.config.tmp_dir, prefix=f"steps_sample_of_{self.ai_condition_idx}_ai_case_", suffix=".npy"
         ).name
 
-        i = 0
         with (
             state_logger.open_to_read(),
             NumpyArrayDumper(
@@ -237,12 +236,15 @@ class Simulation(Worker):
                 filename=filename,
             ).open("w") as sample_saver,
         ):
+            i = 0
             for __ in range(state_logger.logged_steps_count):
                 __, temperature, pressure, mass_fractions = state_logger.read_step_data()  # type: ignore[assignment]
-                if temperature >= ai_condition.temperature + i * temperature_delta:
+                if temperature >= ai_condition.temperature + (i + 1) * temperature_delta:
                     data = np.concatenate((np.array((temperature, pressure), dtype=np.float64), mass_fractions), axis=0)
                     sample_saver.write_data(data)
                     i += 1
+                    if i == 20:
+                        break
 
         if i < ai_condition.steps_sample_size:
             msg = f"Too small steps sample is got for {self.ai_condition_idx} case. \

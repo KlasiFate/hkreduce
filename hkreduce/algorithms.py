@@ -1,3 +1,5 @@
+# ruff: noqa: N806
+
 import numpy as np
 from cantera import Solution  # type: ignore[import-untyped]
 from loguru import logger
@@ -8,7 +10,7 @@ from .typing import PathLike
 from .utils import NumpyArrayDumper, create_unique_file
 
 
-def create_matrix_for_drg(  # type: ignore[return]
+def create_matrix_for_drg(  # type: ignore[return] # noqa: C901
     st: Solution,
     temperature: float,
     pressure: float,
@@ -19,7 +21,6 @@ def create_matrix_for_drg(  # type: ignore[return]
     ai_cond_idx: int,
     state_idx: int,
 ) -> CSRAdjacencyMatrix:
-    # Устанавливаем состояние системы чтобы в дальнейшем взять необходимые данные, посчитанные cantera'ой
     st.TPY = (temperature, pressure, mass_fractions)
 
     if save:
@@ -36,71 +37,6 @@ def create_matrix_for_drg(  # type: ignore[return]
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
-    # Данные взятые из canter'ы:
-    #
-    # st.net_rates_of_progress - Вектор коэффициентов скорости реакций для заданного состояния.
-    # Размерность вектора: кол-во реакция
-    #
-    # st.product_stoich_coeffs - Двумерный массив (матрица) стехиометрических коэффициентов (тип double) продуктов (те
-    # коэффициентов соответствующих правым частям хим. уравнений).
-    # Размерность: кол-во веществ * кол-во реакций
-    #
-    # st.reactant_stoich_coeffs - Аналогично, только для реагентов (те коэфф. левых частей уравнений).
-    #
-    # st.n_species - Кол-во веществ
-
-    # st.net_rates_of_progress != 0 - Битовая маска, указывающая какие скорости реакций != 0.
-    # Размерность та же что и у st.net_rates_of_progress.
-    #
-    # valid_reactions = np.where(st.net_rates_of_progress != 0) - Массив (вектор) индексов, в которых значения == true.
-    # Те массив индексов реакций, скорость которых != 0. Такие реакции дальше называются валидными.
-    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
-
-    # product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions] - Двумерный массив (матрица)
-    # стехиометрических коэффициентов продуктов, но только для валидных реакций.
-    # Размерность: кол-во веществ * кол-во валидных реакций
-    #
-    # [:, ... - указывает взять по 0 оси все элементы (все строки) (те взять для всех веществ их векторы
-    # стехиометрических коэффициентов, соответствующих правым частям хим. уравнений).
-    # ..., valid_reactions] - взять по 1 для каждой строки оси только те элементы (столбцы),
-    # индексы которых есть в valid_reactions массиве
-    # (те взять для каждого вещества коэффициенты, которые относятся к валидным реакциям).
-    product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
-    # reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions] - аналогично только для реагентов
-    reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
-    # stoich_coeffs - Итоговый двумерный знаковый массив стехиометрических коэффициентов для валидных реакций
-    stoich_coeffs = product_stoich_coeffs - reactant_stoich_coeffs
-
-    # reactions_rate_coeffs = st.net_rates_of_progress[valid_reactions] - Вектор коэфф. скоростей валидных реакций.
-    reactions_rate_coeffs = st.net_rates_of_progress[valid_reactions]
-    # Удаляем для освобождения памяти
-    del valid_reactions
-
-    # stoich_coeffs * reactions_rate_coeffs - как умножение матрицы на вектор, только поэлементное
-    # (те без финальной операции сложения по строке).
-    # Тем самым получим двумерный массив νAi * ωi с размерностью равной кол-во веществ * кол-во валидных реакций.
-    # np.abs - просто поэлементное применение модуля
-    base_rates = np.abs(stoich_coeffs * reactions_rate_coeffs)
-    del stoich_coeffs, reactions_rate_coeffs
-
-    # delta - Двумерный битовый массив, указывающий в каких валидных реакциях используется вещество.
-    # Размерность: кол-во веществ * кол-во валидных реакций.
-    # Те это двум. массив δBi.
-    # ... | ... - поэлементное битовый OR.
-    delta = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
-    del product_stoich_coeffs, reactant_stoich_coeffs
-
-    # np.sum(base_rates, axis=1) - Просуммирует по 1 оси все элементы (по валидным реакциям), тем самым получим
-    # вектор знаменателей (из формулы для DRG) для каждого вещества.
-    divider = np.sum(base_rates, axis=1)
-
-    try:
-        matrix = CSRAdjacencyMatrix(st.n_species)
-    except Exception as error:
-        raise RuntimeError("Exception from c++ layer") from error
-
-    saver: NumpyArrayDumper | None = None
-    if save:
         logger.trace(
             "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
         )
@@ -111,40 +47,62 @@ def create_matrix_for_drg(  # type: ignore[return]
             ).name,
         ).open("w")
 
-    for specy_a in range(st.n_species):
-        if divider[specy_a] == 0:
-            if save:
-                saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
-            continue
+    # only consider contributions from reactions with nonzero net rates of progress
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
 
-        # specy_a - Индекс вещества A.
-        #
-        # base_rates[specy_a] - Вектор |νAi * ωi| для вещества A. Размерность: кол-во валидных реакций.
-        #
-        # delta * base_rates[specy_a] - Двумерный массив |νAi * ωi| * δBi.
-        # delta - Матрица в которой строка соответствует веществу B, элементы же этой строки соответствуют
-        # |νAi * ωi| * δBi.
-        # Размерность: кол-во веществ * кол-во валидных реакций
-        #
-        # coefs_for_specy_a = np.sum(...) - Вектор rAB, где A для фиксировано.
-        # Тем самым получили все коэфф. матрицы смежности для вещества A, те строку этой матрицы.
-        coefs_for_specy_a = np.dot(delta, base_rates[specy_a]) / divider[specy_a]
+    try:
+        csr_matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
+        if save:
+            saver.close()
+        raise RuntimeError("Exception from c++ layer") from error
 
-        # Зануляем rAA
-        coefs_for_specy_a[specy_a] = 0
+    if valid_reactions.size:
+        product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
+        reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
+        net_stoich = reactant_stoich_coeffs - product_stoich_coeffs
+
+        flags = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
+
+        del product_stoich_coeffs, reactant_stoich_coeffs
+
+        base_rates = np.abs(net_stoich * st.net_rates_of_progress[valid_reactions])
+
+        del valid_reactions, net_stoich
+
+        denominator = np.sum(base_rates, axis=1)[:, np.newaxis]
+
+        numerator = np.empty((st.n_species, st.n_species), dtype=np.float64)
+        for specy_b in range(st.n_species):
+            numerator[:, specy_b] = np.sum(base_rates[:, np.where(flags[specy_b])[0]], axis=1)
+
+        del base_rates, flags
+
+        # May get divide by zero if an inert species is present, and denominator
+        # entry is zero.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            adjacency_matrix = np.where(denominator != 0, numerator / denominator, 0)
+
+        del denominator, numerator
+
+        np.fill_diagonal(adjacency_matrix, 0.0)
 
         if save:
-            saver.write_data(coefs_for_specy_a)
+            saver.write_data(adjacency_matrix)
 
         try:
-            matrix.add_row(coefs_for_specy_a, specy_a)
+            for specy_a in range(st.n_species):
+                csr_matrix.add_row(adjacency_matrix[specy_a], specy_a)
         except Exception as error:
             if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
+    elif save:
+        saver.write_data(np.zeros((st.n_species, st.n_species), dtype=np.float64))
+
     try:
-        matrix.finalize()
+        csr_matrix.finalize()
     except Exception as error:
         if save:
             saver.close()
@@ -152,10 +110,11 @@ def create_matrix_for_drg(  # type: ignore[return]
 
     if save:
         saver.close()
-    return matrix
+
+    return csr_matrix
 
 
-def create_matrix_for_drgep(  # type: ignore[return]
+def create_matrix_for_drgep(  # type: ignore[return] # noqa: C901
     st: Solution,
     temperature: float,
     pressure: float,
@@ -166,8 +125,6 @@ def create_matrix_for_drgep(  # type: ignore[return]
     ai_cond_idx: int,
     state_idx: int,
 ) -> CSRAdjacencyMatrix:
-    # См. комментарии drg_run, тк большая часть кода аналогична
-
     st.TPY = (temperature, pressure, mass_fractions)
 
     if save:
@@ -184,36 +141,6 @@ def create_matrix_for_drgep(  # type: ignore[return]
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
-    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
-    product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
-    reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
-    stoich_coeffs = product_stoich_coeffs - reactant_stoich_coeffs
-
-    reactions_rate_coeffs = st.net_rates_of_progress[valid_reactions]
-    del valid_reactions
-
-    base_rates_not_abs = stoich_coeffs * reactions_rate_coeffs
-    del stoich_coeffs, reactions_rate_coeffs
-
-    # np.sum(base_rates_not_abs, axis=1, where=base_rates_not_abs > 0) - Складывает все положительные элементы
-    # по строкам. Получим вектор коэффициентов PA для каждого A.
-    pa = np.sum(base_rates_not_abs, axis=1, where=base_rates_not_abs > 0)
-    # Аналогично, только разница в том, что суммируем только отрицательные элементы, и только потом
-    # домножим на -1.
-    ca = np.sum(base_rates_not_abs, axis=1, where=base_rates_not_abs < 0)
-    # Делаем через *=, чтобы изменить уже готовый массив
-    ca *= -1
-
-    delta = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
-    del product_stoich_coeffs, reactant_stoich_coeffs
-
-    try:
-        matrix = CSRAdjacencyMatrix(st.n_species)
-    except Exception as error:
-        raise RuntimeError("Exception from c++ layer") from error
-
-    saver: NumpyArrayDumper | None = None
-    if save:
         logger.trace(
             "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
         )
@@ -224,30 +151,65 @@ def create_matrix_for_drgep(  # type: ignore[return]
             ).name,
         ).open("w")
 
-    for specy_a in range(st.n_species):
-        divider = max(pa[specy_a], ca[specy_a])
-        if divider == 0:
-            if save:
-                saver.write_data(np.zeros((st.n_species,), dtype=np.float64))
-            continue
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
 
-        coefs_for_specy_a = np.abs(np.sum(delta * base_rates_not_abs[specy_a], axis=1))
-        coefs_for_specy_a /= divider
+    try:
+        csr_matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
+        if save:
+            saver.close()
+        raise RuntimeError("Exception from c++ layer") from error
 
-        coefs_for_specy_a[specy_a] = 0
+    if valid_reactions.size:
+        product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
+        reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
+        net_stoich = reactant_stoich_coeffs - product_stoich_coeffs
+
+        flags = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
+
+        del product_stoich_coeffs, reactant_stoich_coeffs
+
+        base_rates = net_stoich * st.net_rates_of_progress[valid_reactions]
+
+        del valid_reactions, net_stoich
+
+        denominator_dest = np.sum(np.minimum(0.0, base_rates), axis=1) * (-1)
+        denominator_prod = np.sum(np.maximum(0.0, base_rates), axis=1)
+        denominator = np.maximum(denominator_prod, denominator_dest)[:, np.newaxis]
+        del denominator_dest, denominator_prod
+
+        numerator = np.empty((st.n_species, st.n_species), dtype=np.float64)
+        for specy_b in range(st.n_species):
+            numerator[:, specy_b] = np.sum(base_rates[:, np.where(flags[specy_b])[0]], axis=1)
+        numerator = np.abs(numerator)
+
+        del base_rates, flags
+
+        # May get divide by zero if an inert species is present, and denominator
+        # entry is zero.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            adjacency_matrix = np.where(denominator != 0, numerator / denominator, 0)
+
+        del numerator, denominator
+
+        np.fill_diagonal(adjacency_matrix, 0.0)
 
         if save:
-            saver.write_data(coefs_for_specy_a)
+            saver.write_data(adjacency_matrix)
 
         try:
-            matrix.add_row(coefs_for_specy_a, specy_a)
+            for specy_a in range(st.n_species):
+                csr_matrix.add_row(adjacency_matrix[specy_a], specy_a)
         except Exception as error:
             if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
+    elif save:
+        saver.write_data(np.zeros((st.n_species, st.n_species), dtype=np.float64))
+
     try:
-        matrix.finalize()
+        csr_matrix.finalize()
     except Exception as error:
         if save:
             saver.close()
@@ -255,10 +217,11 @@ def create_matrix_for_drgep(  # type: ignore[return]
 
     if save:
         saver.close()
-    return matrix
+
+    return csr_matrix
 
 
-def create_matrix_for_pfa(  # type: ignore[return]
+def create_matrix_for_pfa(  # type: ignore[return] # noqa: C901
     st: Solution,
     temperature: float,
     pressure: float,
@@ -269,8 +232,6 @@ def create_matrix_for_pfa(  # type: ignore[return]
     ai_cond_idx: int,
     state_idx: int,
 ) -> CSRAdjacencyMatrix:
-    # См. комментарии drg_run, тк большая часть кода аналогична
-
     st.TPX = (temperature, pressure, mass_fractions)
 
     if save:
@@ -287,53 +248,6 @@ def create_matrix_for_pfa(  # type: ignore[return]
         ).open("w") as saver:
             saver.write_data(st.net_rates_of_progress)
 
-    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
-    product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
-    reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
-    stoich_coeffs = product_stoich_coeffs - reactant_stoich_coeffs
-
-    reactions_rate_coeffs = st.net_rates_of_progress[valid_reactions]
-    del valid_reactions
-
-    base_rates_not_abs = stoich_coeffs * reactions_rate_coeffs
-    del stoich_coeffs, reactions_rate_coeffs
-
-    pa = np.sum(base_rates_not_abs, axis=1, where=base_rates_not_abs > 0)
-    ca = np.sum(base_rates_not_abs, axis=1, where=base_rates_not_abs < 0)
-    ca *= -1
-
-    delta = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
-    del product_stoich_coeffs, reactant_stoich_coeffs
-
-    rab_pro_1 = np.empty((st.n_species, st.n_species), dtype=np.float64)
-    rab_con_1 = np.empty((st.n_species, st.n_species), dtype=np.float64)
-
-    for specy_a in range(st.n_species):
-        divider = max(pa[specy_a], ca[specy_a])
-        if divider != 0:
-            rab_pro_1_for_specy_a = np.dot(delta, np.maximum(base_rates_not_abs[specy_a], 0))
-            rab_pro_1_for_specy_a /= divider
-            rab_con_1_for_specy_a = np.dot(delta, np.minimum(base_rates_not_abs[specy_a], 0))
-            rab_con_1_for_specy_a *= -1 / divider
-
-            rab_pro_1_for_specy_a[specy_a] = 0
-            rab_con_1_for_specy_a[specy_a] = 0
-
-            rab_pro_1[specy_a] = rab_pro_1_for_specy_a
-            rab_con_1[specy_a] = rab_con_1_for_specy_a
-        else:
-            rab_pro_1[specy_a] = 0
-            rab_con_1[specy_a] = 0
-
-    rab_pro_2 = np.dot(rab_pro_1, rab_pro_1)
-    rab_con_2 = np.dot(rab_con_1, rab_con_1)
-
-    try:
-        matrix = CSRAdjacencyMatrix(st.n_species)
-    except Exception as error:
-        raise RuntimeError("Exception from c++ layer") from error
-
-    if save:
         logger.trace(
             "Save matrix for {state_idx} state of {ai_cond_idx} case", state_idx=state_idx, ai_cond_idx=ai_cond_idx
         )
@@ -344,21 +258,93 @@ def create_matrix_for_pfa(  # type: ignore[return]
             ).name,
         ).open("w")
 
-    for specy_a in range(st.n_species):
-        rab = rab_pro_1[specy_a] + rab_con_1[specy_a] + rab_pro_2[specy_a] + rab_con_2[specy_a]
-
+    try:
+        csr_matrix = CSRAdjacencyMatrix(st.n_species)
+    except Exception as error:
         if save:
-            saver.write_data(rab)
+            saver.close()
+        raise RuntimeError("Exception from c++ layer") from error
+
+    valid_reactions = np.where(st.net_rates_of_progress != 0)[0]
+
+    if valid_reactions.size:
+        product_stoich_coeffs = st.product_stoich_coeffs[:, valid_reactions]
+        reactant_stoich_coeffs = st.reactant_stoich_coeffs[:, valid_reactions]
+        net_stoich = reactant_stoich_coeffs - product_stoich_coeffs
+
+        flags = (product_stoich_coeffs != 0) | (reactant_stoich_coeffs != 0)
+
+        del product_stoich_coeffs, reactant_stoich_coeffs
+
+        base_rates = np.array(net_stoich * st.net_rates_of_progress[valid_reactions])
+
+        del net_stoich
+
+        production_A = np.sum(np.maximum(base_rates, 0), axis=1)
+        consumption_A = -1 * np.sum(np.minimum(base_rates, 0), axis=1)
+        production_AB = np.empty((st.n_species, st.n_species), dtype=np.float64)
+        consumption_AB = np.empty((st.n_species, st.n_species), dtype=np.float64)
+        for specy_b in range(st.n_species):
+            production_AB[:, specy_b] = np.sum(np.maximum(base_rates[:, np.where(flags[specy_b])[0]], 0.0), axis=1)
+            consumption_AB[:, specy_b] = -1 * np.sum(
+                np.minimum(base_rates[:, np.where(flags[specy_b])[0]], 0.0), axis=1
+            )
+
+        del base_rates
+
+        # May get divide by zero if an inert species is present, and denominator
+        # entry is zero.
+        denominator = np.maximum(production_A, consumption_A)[:, np.newaxis]
+
+        del production_A, consumption_A
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r_pro_AB1 = np.where(denominator != 0, production_AB / denominator, 0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r_con_AB1 = np.where(denominator != 0, consumption_AB / denominator, 0)
+
+        del production_AB, consumption_AB, denominator
+
+        r_pro_AB2: NDArray[np.float64] | None = None
+        r_con_AB2: NDArray[np.float64] | None = None
+
+        for specy_m in range(st.n_species):
+            pro1 = r_pro_AB1[:, specy_m]
+            pro2 = r_pro_AB1[specy_m, :]
+            con1 = r_con_AB1[:, specy_m]
+            con2 = r_con_AB1[specy_m, :]
+            pro1[specy_m] = 0
+            pro2[specy_m] = 0
+            con1[specy_m] = 0
+            con2[specy_m] = 0
+            if r_pro_AB2 is None:
+                r_pro_AB2 = np.outer(pro1, pro2)
+            else:
+                r_pro_AB2 += np.outer(pro1, pro2)
+            if r_con_AB2 is None:
+                r_con_AB2 = np.outer(con1, con2)
+            else:
+                r_con_AB2 += np.outer(con1, con2)
+
+        del pro1, pro2, con1, con2
+
+        adjacency_matrix = r_pro_AB1 + r_con_AB1 + r_pro_AB2 + r_con_AB2
+
+        del r_pro_AB1, r_con_AB1, r_pro_AB2, r_con_AB2
 
         try:
-            matrix.add_row(rab, specy_a)
+            for specy_a in range(st.n_species):
+                csr_matrix.add_row(adjacency_matrix[specy_a], specy_a)
         except Exception as error:
             if save:
                 saver.close()
             raise RuntimeError("Exception from c++ layer") from error
 
+    elif save:
+        saver.write_data(np.zeros((st.n_species, st.n_species), dtype=np.float64))
+
     try:
-        matrix.finalize()
+        csr_matrix.finalize()
     except Exception as error:
         if save:
             saver.close()
@@ -366,4 +352,5 @@ def create_matrix_for_pfa(  # type: ignore[return]
 
     if save:
         saver.close()
-    return matrix
+
+    return csr_matrix
