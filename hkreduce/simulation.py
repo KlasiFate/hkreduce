@@ -71,7 +71,7 @@ class StateLogger:
 
             yield self
         finally:
-            self._dumper.close()
+            self._dumper.close() # type: ignore[union-attr]
 
     @contextmanager
     def open_to_read(self) -> Generator["StateLogger", Any, Any]:

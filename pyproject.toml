@@ -2,7 +2,7 @@
 name = "hkreduce"
 version = "0.1.0"
 description = ""
-authors = ["KlasiFate <klasifate@gmail.com>"]
+authors = ["klasifate <klasifate@gmail.com>", "nevinskii-georgii mririyss@gmail.com"]
 readme = "README.md"
 packages = [{include = "hkreduce"}]
 package-mode = true

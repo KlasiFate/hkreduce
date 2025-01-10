@@ -5,6 +5,7 @@ from pydantic_core import PydanticUndefined
 
 from .config import CliOptionsAdditionalInfo, Config
 
+# supported types for cli options and their priority
 PRIMITIVE_TYPES = [
     bool,
     int,
